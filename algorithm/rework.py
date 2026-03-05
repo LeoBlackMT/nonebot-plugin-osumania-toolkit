@@ -221,7 +221,7 @@ async def get_rework_sr(file_path: str, speed_rate: float, od_flag, cvt_flag):
         raise Exception(f"{e}")
     
     
-def est_diff(sr: float) -> str:
+def est_diff(sr: float, LN_ratio: float) -> str:
     LN_intervals = [
         (4.832, 4.898, "LN 5 mid"),
         (4.898, 4.963, "LN 5 mid/high"),
@@ -408,6 +408,9 @@ def est_diff(sr: float) -> str:
         else:
             RC_diff = "未知RC难度"
 
+    if LN_ratio < 0.1:
+        return f"{RC_diff}"
+    
     # LN难度匹配
     LN_diff = None
     for lower, upper, name in LN_intervals:

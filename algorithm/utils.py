@@ -1,68 +1,60 @@
-import re
-import asyncio
-import aiohttp
+import numpy as np
 
-from nonebot.log import logger
-from pathlib import Path
-from urllib.parse import unquote
+from ..file.osr_file_parser import osr_file
+from ..file.osu_file_parser import osu_file
 
 
-def safe_filename(filename: str) -> str:
-    return re.sub(r'[\\/*?:"<>|]', '_', filename)
 
+def findkey(x = 0):
+    keyset = [0 for i in range(18)]
+    (a, keyset[0]) = (x//2, x%2)
+    j = 1
+    while a != 0:
+        (a, keyset[j]) = (a//2, a%2)
+        j += 1
+    return np.array(keyset)
 
-async def download_file(url: str, save_path: Path) -> bool:
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    with open(save_path, 'wb') as f:
-                        f.write(await resp.read())
-                    return True
-                else:
-                    logger.error(f"下载失败，状态码：{resp.status}")
-                    return False
-    except Exception as e:
-        logger.error(f"下载异常：{e}")
-        return False
+def string_to_int(s):
+    return int(float(s))
 
+def collect_data(data, new_datum):
+    data.append(new_datum)
 
-async def download_file_by_id(cache_dir: Path, map_id: int) -> tuple[Path, str]:
-    url = f"https://osu.ppy.sh/osu/{map_id}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    raise Exception(f"下载失败，HTTP {resp.status}")
-                
-                content_disp = resp.headers.get('Content-Disposition', '')
-                filename = None
-                if content_disp:
-                    match = re.search(r"filename\*?=UTF-8''(.+)", content_disp) or \
-                            re.search(r'filename="(.+)"', content_disp)
-                    if match:
-                        filename = unquote(match.group(1))
-                if not filename:
-                    # 如果获取失败，使用默认的 map_id 作为文件名
-                    filename = f"b{map_id}"
-                
-                content = await resp.read()
-                
-    except Exception as e:
-        raise Exception(f"下载谱面时出错: {e}")
+def match_notes_and_presses(osu: osu_file, osr: osr_file):
+    """
+    匹配物件和按下事件，返回匹配的列表。
+    参数:
+        osu: osu文件实例
+        osr: osr文件实例
+    返回:
+        list of (col, delta_t) 差值列表
+        list of (col, note_time, press_time) 详细匹配对（可选）
+    """
+    # 按列整理按下事件
+    note_times_by_col = osu.note_times
+    press_events = osr.press_events
+    max_diff = 188 - 3 * osu.od
+    press_by_col = {}
+    for col, t in press_events:
+        press_by_col.setdefault(col, []).append(t)
+    for col in press_by_col:
+        press_by_col[col].sort()
 
-    tmp_file = cache_dir / f"{map_id}.osu"
-    with open(tmp_file, 'wb') as f:
-        f.write(content)
-
-    return tmp_file, filename
-
-
-async def cleanup_temp_file(file_path: Path, delay: float = 10.0):
-    await asyncio.sleep(delay)
-    try:
-        if file_path.exists():
-            file_path.unlink()
-            logger.debug(f"已清理临时文件：{file_path}")
-    except Exception as e:
-        logger.warning(f"清理文件失败：{e}")
+    delta_list = []
+    matched_pairs = []  # 详细对
+    for col in note_times_by_col:
+        notes = note_times_by_col[col]
+        presses = press_by_col.get(col, [])
+        i = j = 0
+        while i < len(notes) and j < len(presses):
+            diff = presses[j] - notes[i]
+            if abs(diff) <= max_diff:
+                delta_list.append((col, diff))
+                matched_pairs.append((col, notes[i], presses[j]))
+                i += 1
+                j += 1
+            elif presses[j] < notes[i] - max_diff:
+                j += 1
+            else:
+                i += 1
+    return delta_list, matched_pairs

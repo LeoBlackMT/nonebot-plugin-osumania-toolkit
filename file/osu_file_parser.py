@@ -1,12 +1,8 @@
 import numpy as np
 
-def string_to_int(s):
-    return int(float(s))
+from ..algorithm.utils import string_to_int, collect_data
 
-def collect_data(data, new_datum):
-    data.append(new_datum)
-
-class parser:
+class osu_file:
     def __init__(self, file_path):
         self.file_path = file_path
         self.od = -1
@@ -18,6 +14,7 @@ class parser:
         self.GameMode = None
         self.status = "init"
         self.LN_ratio = 0.0
+        self.note_times = {}
 
     def get_parsed_data(self):
         return [self.column_count,
@@ -77,6 +74,7 @@ class parser:
 
             i += 1
         self.LN_ratio = self.get_LN_ratio()
+        self.note_times = self.get_note_times()
 
     def parse_hit_object(self, object_line):
         params = object_line.split(",")
@@ -108,6 +106,14 @@ class parser:
             return 0.0
         ln_count = sum(1 for t in self.note_types if t == 128)
         return ln_count / total_notes
+    
+    def get_note_times(self):
+        note_times = {}
+        for col, t in zip(self.columns, self.note_starts):
+            note_times.setdefault(col, []).append(t)
+        for col in note_times:
+            note_times[col].sort()
+        return note_times
     
     def mod_IN(self, gap: float = 150, ln_as_hit_thres: float = 100):
         # 反键处理 (Full LN)

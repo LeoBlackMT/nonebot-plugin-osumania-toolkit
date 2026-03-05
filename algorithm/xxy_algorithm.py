@@ -1,4 +1,4 @@
-from .osu_file_parser import *
+from ..file.osu_file_parser import *
 from collections import defaultdict
 import numpy as np
 import heapq
@@ -79,7 +79,7 @@ def find_next_note_in_column(note, times, note_seq_by_column):
 # -----End of Helper methods--------
 
 def preprocess_file(file_path, speed_rate, od_flag, cvt_flag):
-    p_obj = parser(file_path)
+    p_obj = osu_file(file_path)
     p_obj.process()
     
     if cvt_flag:

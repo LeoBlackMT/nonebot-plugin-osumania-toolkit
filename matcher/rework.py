@@ -4,7 +4,7 @@ import aiohttp
 from nonebot import on_command, require
 from nonebot.adapters.onebot.v11 import MessageEvent
 
-from ..algorithm.utils import download_file_by_id
+from ..file.file import download_file_by_id
 from ..algorithm.rework import get_result, est_diff, get_rework_sr, parse_cmd, parse_osu_filename
 
 require("nonebot_plugin_localstore")
@@ -68,7 +68,7 @@ async def handle_rework(event: MessageEvent):
             # 计算星数
             sr, LN_ratio = await get_rework_sr(str(tmp_file), speed_rate, od_flag, cvt_flag)
 
-            await rework.send(get_result(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, est_diff(sr)))
+            await rework.send(get_result(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, est_diff(sr, LN_ratio)), reply_to=True)
             
         except Exception as e:
             if str(e) == "ParseError":
@@ -90,7 +90,7 @@ async def handle_rework(event: MessageEvent):
             tmp_file, file_name = await download_file_by_id(CACHE_DIR,bid)
             sr, LN_ratio = await get_rework_sr(str(tmp_file), speed_rate, od_flag, cvt_flag)
 
-            await rework.send(get_result(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, est_diff(sr)))
+            await rework.send(get_result(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, est_diff(sr, LN_ratio)), reply_to=True)
         except Exception as e:
             await rework.send(f"{e}")
         finally:
