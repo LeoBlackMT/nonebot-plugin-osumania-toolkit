@@ -1,5 +1,6 @@
-from nonebot import get_plugin_config
+from nonebot import get_plugin_config, require
 from nonebot.plugin import PluginMetadata
+require("nonebot_plugin_localstore")
 
 from .matcher import *
 from .config import Config

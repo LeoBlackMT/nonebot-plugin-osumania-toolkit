@@ -12,7 +12,6 @@ from ..file.draw import plot_pressingtime
 from ..file.file import safe_filename, download_file, cleanup_temp_file
 
 
-require("nonebot_plugin_localstore")
 from nonebot_plugin_localstore import get_plugin_cache_dir
 
 CACHE_DIR = get_plugin_cache_dir()
