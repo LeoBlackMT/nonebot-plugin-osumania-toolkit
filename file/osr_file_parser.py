@@ -1,5 +1,4 @@
 import osrparse
-import os
 import numpy as np
 
 from collections import Counter
@@ -32,6 +31,7 @@ class osr_file:
         self.timestamp = info.timestamp
         self.mod = str(Mod(info.mod_combination))
         self.play_data = info.play_data
+        self.life_bar_graph = info.life_bar_graph
         
         self.sample_rate = float('inf')
         self.pressset = [[] for _ in range(18)]
@@ -92,6 +92,7 @@ class osr_file:
             "press_times": self.press_times,
             "press_events": self.press_events,
             "intervals": self.intervals,
+            "life_bar_graph": self.life_bar_graph,
             "sample_rate": self.sample_rate,
             "timestamp": self.timestamp,
             "file_path": self.file_path,
