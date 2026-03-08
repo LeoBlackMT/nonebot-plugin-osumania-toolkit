@@ -135,7 +135,7 @@ def plot_delta(osr_obj: osr_file, osu_obj: osu_file, output_dir: str):
 
     plt.figure(figsize=(12, 6))
     miss_band = 188 - 3 * osu_obj.od
-    bins = np.linspace(-miss_band, miss_band, 200)
+    bins = np.linspace(-miss_band, miss_band, 100)
     for col, deltas in delta_by_col.items():
         plt.hist(deltas, bins=bins, alpha=0.5, label=f'Col {col+1}', histtype='stepfilled')
     plt.xlabel('Delta Time (ms)')

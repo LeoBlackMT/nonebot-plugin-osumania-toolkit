@@ -1,85 +1,85 @@
 import bisect
 from nonebot.log import logger
 
-def match_notes_and_presses(osu, osr):
-    note_times_by_col = osu.note_times
-    press_events = osr.press_events
-    max_diff = 188 - 3 * osu.od
+from ..file.osr_file_parser import osr_file
+from ..file.osu_file_parser import osu_file
 
+def match_notes_and_presses(osu: osu_file, osr: osr_file):
+    """
+    匹配物件和按下事件，返回匹配的列表。
+    参数:
+        osu: osu文件实例
+        osr: osr文件实例
+    返回:
+        list of (col, delta_t) 差值列表
+        list of (col, note_time, press_time) 详细匹配对
+    """
+    note_times_by_col = osu.note_times
+    all_notes = [t for times in note_times_by_col.values() for t in times]
+    if not all_notes:
+        return [], []
+    min_note = min(all_notes)
+    max_note = max(all_notes)
+    buffer = 5000  # 允许5秒的缓冲
+
+    # 按列整理按下事件，并过滤超出时间范围的事件
+    press_events = osr.press_events
     press_by_col = {}
     for col, t in press_events:
-        press_by_col.setdefault(col, []).append(t)
+        if min_note - buffer <= t <= max_note + buffer:
+            press_by_col.setdefault(col, []).append(t)
+
     for col in press_by_col:
         press_by_col[col].sort()
 
     delta_list = []
     matched_pairs = []
+    max_diff = 188 - 3 * osu.od  # 最大允许偏差
+
+    import bisect
 
     for col in note_times_by_col:
         notes = note_times_by_col[col]
         presses = press_by_col.get(col, [])
         if not presses:
             continue
-        # 记录哪些按下事件已被使用（可以用布尔数组）
         used = [False] * len(presses)
         for note in notes:
-            # 在 presses 中查找离 note 最近且未使用的
+            # 二分查找插入点
             idx = bisect.bisect_left(presses, note)
-            candidates = []
-            if idx < len(presses) and not used[idx]:
-                candidates.append((idx, abs(presses[idx] - note)))
-            if idx > 0 and not used[idx-1]:
-                candidates.append((idx-1, abs(presses[idx-1] - note)))
-            # 可选：也考虑稍远一点的，但二分查找已足够
-            if candidates:
-                best_idx, best_dist = min(candidates, key=lambda x: x[1])
-                if best_dist <= max_diff:
-                    used[best_idx] = True
-                    delta_list.append((col, presses[best_idx] - note))
-                    matched_pairs.append((col, note, presses[best_idx]))
+            best = None
+            best_dist = None
+            # 向左搜索
+            i = idx - 1
+            while i >= 0:
+                if not used[i]:
+                    dist = abs(presses[i] - note)
+                    if dist <= max_diff:
+                        best = i
+                        best_dist = dist
+                    break  # 找到第一个可用的即停止，因为更远的距离只会更大
+                i -= 1
+            # 向右搜索
+            i = idx
+            while i < len(presses):
+                if not used[i]:
+                    dist = abs(presses[i] - note)
+                    if dist <= max_diff:
+                        if best is None or dist < best_dist:
+                            best = i
+                            best_dist = dist
+                    break  # 同样，找到第一个可用的即停止
+                i += 1
+            # 如果找到了可用事件
+            if best is not None:
+                used[best] = True
+                delta_list.append((col, presses[best] - note))
+                matched_pairs.append((col, note, presses[best]))
     logger.debug(f"匹配到的点数量: {len(delta_list)}")
     logger.debug(f"匹配到的最后物件时间: {max(note for _, note, _ in matched_pairs) if matched_pairs else 0} ms")
     return delta_list, matched_pairs
-
-# def match_notes_and_presses(osu: osu_file, osr: osr_file):
-#     """
-#     匹配物件和按下事件，返回匹配的列表。
-#     参数:
-#         osu: osu文件实例
-#         osr: osr文件实例
-#     返回:
-#         list of (col, delta_t) 差值列表
-#         list of (col, note_time, press_time) 详细匹配对（可选）
-#     """
-#     # 按列整理按下事件
-#     note_times_by_col = osu.note_times
-#     press_events = osr.press_events
-#     # max_diff = 188 - 3 * osu.od
-#     max_diff = 30
-#     press_by_col = {}
-#     for col, t in press_events:
-#         press_by_col.setdefault(col, []).append(t)
-#     for col in press_by_col:
-#         press_by_col[col].sort()
-
-#     delta_list = []
-#     matched_pairs = []  # 详细对
-#     for col in note_times_by_col:
-#         notes = note_times_by_col[col]
-#         presses = press_by_col.get(col, [])
-#         i = j = 0
-#         while i < len(notes) and j < len(presses):
-#             diff = presses[j] - notes[i]
-#             if abs(diff) <= max_diff:
-#                 delta_list.append((col, diff))
-#                 matched_pairs.append((col, notes[i], presses[j]))
-#                 i += 1
-#                 j += 1
-#             elif presses[j] < notes[i] - max_diff:
-#                 j += 1
-#             else:
-#                 i += 1
-#     return delta_list, matched_pairs
+    # logger.debug(f"匹配到的点数量: {len(delta_list)}")
+    # logger.debug(f"匹配到的最后物件时间: {max(note for _, note, _ in matched_pairs) if matched_pairs else 0} ms")
 
 def parse_cmd(cmd_text: str):
     # 辅助变量

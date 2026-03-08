@@ -7,6 +7,7 @@ from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment, Message
 from nonebot.typing import T_State
 from nonebot.params import Arg
 from nonebot.exception import FinishedException
+# from nonebot.log import logger
 
 from ..file.osu_file_parser import osu_file
 from ..file.osr_file_parser import osr_file
@@ -133,6 +134,7 @@ async def handle_first(event: MessageEvent, state: T_State):
             )
             output_path = result
             state["status"] = "Finish"
+            # logger.debug(output_path)
             await delta.finish(MessageSegment.image(f"file://{output_path}"))
         except FinishedException:
             if osr_path and osr_path.exists():
