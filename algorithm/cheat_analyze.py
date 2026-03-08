@@ -15,8 +15,8 @@ async def run_analyze_cheating(osr_obj: osr_file, osu_obj: osu_file=None):
     result = await loop.run_in_executor(
         None,  # 使用默认线程池
         analyze_cheating,
-        osu_obj,
-        osr_obj
+        osr_obj,
+        osu_obj
     )
     return result
 
@@ -153,9 +153,9 @@ def analyze_time_domain(data: dict) -> dict:
         suspicious = True
 
     if not suspicious and not cheat:
-        reason = "时域分析正常"
+        reason = "时域与按压时长分析：正常"
     else:
-        reason = "; ".join(reasons)
+        reason = "时域与按压时长分析： " + "; ".join(reasons)
     return {"cheat": cheat, "sus": suspicious, "reason": reason} 
 
 def analyze_delta_t(osr_obj: osr_file, osu_obj: osu_file):
@@ -235,9 +235,9 @@ def analyze_delta_t(osr_obj: osr_file, osu_obj: osu_file):
         reasons.append("多押按键时间几乎同步")
 
     if not reasons:
-        reason = "偏移分析正常"
+        reason = "偏移分析：正常"
     else:
-        reason = "; ".join(reasons)
+        reason = "偏移分析：" + "; ".join(reasons)
 
     return {
         "cheat": cheat,
@@ -318,7 +318,7 @@ def analyze_pulse_spectrum(data: dict) -> dict:
     snr = peak_amp / local_avg if local_avg > 0 else 0
 
     global_avg = np.mean(search_amp)
-    significant = (snr > 2.0 and peak_amp > 3 * global_avg)
+    significant = (snr > 50.0 and peak_amp > 10 * global_avg)
 
     device_peak = False
     if sample_rate > 0 and (abs(peak_hz - sample_rate) < 2 or
@@ -329,15 +329,23 @@ def analyze_pulse_spectrum(data: dict) -> dict:
     # 生成简短描述
     if significant:
         if device_peak:
-            reason = f"主峰频率 {peak_hz:.0f} Hz 与设备采样率相关。"
+            reason = f"脉冲序列分析：主峰频率 {peak_hz:.0f} Hz 与设备采样率相关。"
             sus = False
             cheat = False
         else:
-            reason = f"主峰 {peak_hz:.1f} Hz (SNR={snr:.1f})"
-            sus = True
-            cheat = True
+            if peak_hz < 30:
+                pass
+            elif peak_hz > 30:
+                reason = f"脉冲序列分析：主峰 {peak_hz:.1f} Hz (信噪比={snr:.1f})，标记为可疑。"
+                sus = True
+                cheat = False
+            else:
+                reason = f"脉冲序列分析：主峰 {peak_hz:.1f} Hz (信噪比={snr:.1f})，标记为作弊。"
+                sus = True
+                cheat = True                
+            
     else:
-        reason = "脉冲序列正常"
+        reason = "脉冲序列分析：正常"
         cheat = False
         sus = False
 

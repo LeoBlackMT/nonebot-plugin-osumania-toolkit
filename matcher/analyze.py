@@ -131,20 +131,20 @@ async def handle_first(event: MessageEvent, state: T_State):
              
             output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
             result = await run_analyze_cheating(osr, osu)
+            reason_str = "\n".join(result["reasons"]) if result["reasons"] else "无分析结果。"
             if result["cheat"] or result["sus"]:
-                reason = result["reason"]
                 if result["cheat"]:
                     state["status"] = "Finish"
                     await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                    await analyze.finish(f"<!>此成绩检测到作弊：\n{reason}\n仅供参考，请结合其他信息进行判断。")
+                    await analyze.finish(f"<!>此成绩检测到作弊：\n{reason_str}\n仅供参考，请结合其他信息进行判断。")
                 else:
                     state["status"] = "Finish"
                     await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                    await analyze.finish(f"<*>此成绩检测到可疑：\n{reason}\n仅供参考，请结合其他信息进行判断。")
+                    await analyze.finish(f"<*>此成绩检测到可疑：\n{reason_str}\n仅供参考，请结合其他信息进行判断。")
             else:
                 state["status"] = "Finish"
                 await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                await analyze.finish(f"分析完成: \n{reason}\n仅供参考，请结合其他信息进行判断。")
+                await analyze.finish(f"分析完成: \n{reason_str}\n仅供参考，请结合其他信息进行判断。")
         except FinishedException:
             if osr_path and osr_path.exists():
                 asyncio.create_task(cleanup_temp_file(osr_path))
@@ -197,17 +197,17 @@ async def handle_file(state: T_State, user_msg: Message = Arg()):
             try:
                 output_path = await run_plot_comprehensive(str(CACHE_DIR), osr)
                 result = await run_analyze_cheating(osr)
+                reason_str = "\n".join(result["reasons"]) if result["reasons"] else "无分析结果。"
                 if result["cheat"] or result["sus"]:
-                    reason = result["reason"]
                     if result["cheat"]:
                         await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                        await analyze.finish(f"<!>此成绩检测到作弊：\n{reason}\n仅供参考，请结合其他信息进行判断。")
+                        await analyze.finish(f"<!>此成绩检测到作弊：\n{reason_str}\n仅供参考，请结合其他信息进行判断。")
                     else:
                         await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                        await analyze.finish(f"<*>此成绩检测到可疑：\n{reason}\n仅供参考，请结合其他信息进行判断。")
+                        await analyze.finish(f"<*>此成绩检测到可疑：\n{reason_str}\n仅供参考，请结合其他信息进行判断。")
                 else:
                     await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                    await analyze.finish(f"分析完成: \n{reason}\n仅供参考，请结合其他信息进行判断。")
+                    await analyze.finish(f"分析完成: \n{reason_str}\n仅供参考，请结合其他信息进行判断。")
             except Exception as e:
                 await analyze.send
         else:
@@ -255,17 +255,17 @@ async def handle_file(state: T_State, user_msg: Message = Arg()):
         await analyze.send(f"已收到文件，请稍候...") 
         output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
         result = await run_analyze_cheating(osr, osu)
+        reason_str = "\n".join(result["reasons"]) if result["reasons"] else "无分析结果。"
         if result["cheat"] or result["sus"]:
-            reason = result["reason"]
             if result["cheat"]:
                 await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                await analyze.finish(f"<!>此成绩检测到作弊：\n{reason}\n仅供参考，请结合其他信息进行判断。")
+                await analyze.finish(f"<!>此成绩检测到作弊：\n{reason_str}\n仅供参考，请结合其他信息进行判断。")
             else:
                 await analyze.send(MessageSegment.image(f"file://{output_path}"))
-                await analyze.finish(f"<*>此成绩检测到可疑：\n{reason}\n仅供参考，请结合其他信息进行判断。")
+                await analyze.finish(f"<*>此成绩检测到可疑：\n{reason_str}\n仅供参考，请结合其他信息进行判断。")
         else:
             await analyze.send(MessageSegment.image(f"file://{output_path}"))
-            await analyze.finish(f"分析完成: \n{reason}\n仅供参考，请结合其他信息进行判断。")
+            await analyze.finish(f"分析完成: \n{reason_str}\n仅供参考，请结合其他信息进行判断。")
     except FinishedException:
         if osr_path and osr_path.exists():
             asyncio.create_task(cleanup_temp_file(osr_path))
