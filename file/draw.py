@@ -133,9 +133,17 @@ def plot_delta(osr_obj: osr_file, osu_obj: osu_file, output_dir: str):
     for col, d in delta_list:
         delta_by_col.setdefault(col, []).append(d)
 
+    # 获取 delta_list 的范围
+    all_deltas = [d for _, d in delta_list]
+    min_delta = min(all_deltas)
+    max_delta = max(all_deltas)
+    # 添加 5% 的边距
+    margin = (max_delta - min_delta) * 0.05
+    bin_min = min_delta - margin
+    bin_max = max_delta + margin
+
     plt.figure(figsize=(12, 6))
-    miss_band = 188 - 3 * osu_obj.od
-    bins = np.linspace(-miss_band, miss_band, 100)
+    bins = np.linspace(bin_min, bin_max, 75)
     for col, deltas in delta_by_col.items():
         plt.hist(deltas, bins=bins, alpha=0.5, label=f'Col {col+1}', histtype='stepfilled')
     plt.xlabel('Delta Time (ms)')
@@ -388,7 +396,12 @@ def plot_comprehensive(output_dir: str, osr_obj: osr_file, osu_obj: osu_file = N
         delta_list, _ = match_notes_and_presses(osu_obj, osr_obj)
         if delta_list:
             deltas = [d for _, d in delta_list]
-            ax3.hist(deltas, bins=50, alpha=0.7, color='steelblue', edgecolor='black')
+            # 根据数据范围自动调整 bins
+            min_delta = min(deltas)
+            max_delta = max(deltas)
+            margin = (max_delta - min_delta) * 0.05
+            bins_range = np.linspace(min_delta - margin, max_delta + margin, 50)
+            ax3.hist(deltas, bins=bins_range, alpha=0.7, color='steelblue', edgecolor='black')
             ax3.set_xlabel('Delta t (ms)')
             ax3.set_ylabel('Count')
             ax3.set_title('Delta t Distribution')
