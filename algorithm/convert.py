@@ -4,6 +4,7 @@ import datetime
 
 from collections import Counter
 from typing import List, Optional
+from nonebot.log import logger
 
 from ..algorithm.utils import malody_mods_to_osu_mods
 
@@ -310,7 +311,7 @@ def convert_mr_to_osr(mr_obj: mr_file) -> osr_file:
     osr.file_path = mr_obj.file_path
     osr.status = mr_obj.status  # 可能为 "OK" 或 "ParseError"
     osr.player_name = "ConvertedFromMalody"
-    osr.mod = malody_mods_to_osu_mods(mr_obj.mods_flags)
+    osr.mod, osr.mods = malody_mods_to_osu_mods(mr_obj.mods_flags)
 
     # 判定映射：best->320, cool->200, good->100, miss->0
     osr.judge = {
@@ -396,6 +397,7 @@ def convert_mr_to_osr(mr_obj: mr_file) -> osr_file:
         osr.play_data.append(event)
         osr.intervals.append(delta)
         prev_time = time
+        osr.press_events_raw = osr.press_events
 
     # 计算采样率
     if osr.intervals:
@@ -415,4 +417,8 @@ def convert_mr_to_osr(mr_obj: mr_file) -> osr_file:
     # 时间戳已包含速度模组，无需再缩放
     osr.corrector = 1.0
 
+    logger.debug(f"按下事件总数(len(press_events)): {len(osr.press_events)}")
+    logger.debug(f"按下事件总数(len(press_times))：{len(osr.press_times)}")
+    logger.debug(f"按下事件时间样本（前10个）：{str(osr.press_times[:10])}")
+    logger.debug(f"按下事件时间样本（后10个）：{str(osr.press_times[-10:])}")
     return osr

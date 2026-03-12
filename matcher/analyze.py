@@ -65,7 +65,7 @@ async def handle_first(event: MessageEvent, state: T_State):
         state["status"] = "Fail"
         await analyze.finish("无法获取文件下载链接。")
     file_name = os.path.basename(file_name)
-    if not (file_name.lower().endswith(".osr") and file_name.lower().endwith(".mr")) :
+    if not (file_name.lower().endswith(".osr") or file_name.lower().endswith(".mr")) :
         state["status"] = "Fail"
         await analyze.finish("请回复 .osr 或 .mr 格式的回放文件。")
     if not file_url:
@@ -107,8 +107,6 @@ async def handle_first(event: MessageEvent, state: T_State):
     finally:
         if osr_path and osr_path.exists():
             asyncio.create_task(cleanup_temp_file(osr_path))
-        if output_path and Path(output_path).exists():
-            asyncio.create_task(cleanup_temp_file(Path(output_path)))
     
     state["osr"] = osr
     
@@ -177,10 +175,10 @@ async def handle_first(event: MessageEvent, state: T_State):
 @analyze.got("user_file")
 async def handle_file(state: T_State, user_msg: Message = Arg("user_file")):
     # 从 state 中获取之前存储的对象
-    if osr is None or osr_path is None:
-        await analyze.finish("状态异常，请重新开始。")
     osr = state["osr"]
     osr_path = state["osr_path"]
+    if osr is None or osr_path is None:
+        await analyze.finish("状态异常，请重新开始。")
     osu_path = None
     output_path = None
 
@@ -226,6 +224,10 @@ async def handle_file(state: T_State, user_msg: Message = Arg("user_file")):
             except Exception as e:
                 await analyze.send(f"错误：{e}")
             finally:
+                if osr_path and osr_path.exists():
+                        asyncio.create_task(cleanup_temp_file(osr_path))
+                if osu_path and osu_path.exists():
+                    asyncio.create_task(cleanup_temp_file(osu_path))
                 if output_path and Path(output_path).exists():
                     asyncio.create_task(cleanup_temp_file(Path(output_path)))
         else:

@@ -442,6 +442,7 @@ class osr_file:
             "pressset": self.pressset,
             "press_times": self.press_times,
             "press_events": self.press_events,
+            "fft_analysis": None,
             "intervals": self.intervals,
             "life_bar_graph": self.life_bar_graph,
             "sample_rate": self.sample_rate,

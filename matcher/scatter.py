@@ -67,7 +67,7 @@ async def handle_first(event: MessageEvent, state: T_State):
         state["status"] = "Fail"
         await scatter.finish("无法获取文件下载链接。")
     file_name = os.path.basename(file_name)
-    if not (file_name.lower().endswith(".osr") and file_name.lower().endwith(".mr")) :
+    if not (file_name.lower().endswith(".osr") or file_name.lower().endswith(".mr")) :
         state["status"] = "Fail"
         await scatter.finish("请回复 .osr 或 .mr 格式的回放文件。")
     if not file_url:
@@ -109,8 +109,6 @@ async def handle_first(event: MessageEvent, state: T_State):
     finally:
         if osr_path and osr_path.exists():
             asyncio.create_task(cleanup_temp_file(osr_path))
-        if output_path and Path(output_path).exists():
-            asyncio.create_task(cleanup_temp_file(Path(output_path)))
     
     state["osr"] = osr
     
@@ -169,6 +167,10 @@ async def handle_first(event: MessageEvent, state: T_State):
 @scatter.got("user_file")
 async def handle_file(state: T_State, user_file: Message = Arg("user_file")):
     
+    osr_path = state["osr_path"]
+    osu_path = None
+    output_path = None
+       
     match state["status"]:
         case "Fail" | "Finish":
             if osr_path and osr_path.exists():

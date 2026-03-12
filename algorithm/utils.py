@@ -287,12 +287,17 @@ def malody_mods_to_osu_mods(malody_flags: int) -> int:
     其他位忽略。
     """
     osu_mod = 0
+    osu_mods = []
     if malody_flags & (1 << 2):   # Luck
         osu_mod |= 2097152
+        osu_mods.append("Random")
     if malody_flags & (1 << 3):   # Flip
         osu_mod |= 1073741824
+        osu_mods.append("Mirror")
     if malody_flags & (1 << 6):   # Rush
-        osu_mod |= 64   # DoubleTime
+        osu_mod |= 64
+        osu_mods.append("DoubleTime")
     if malody_flags & (1 << 7):   # Hide
-        osu_mod |= 8    # Hidden
-    return osu_mod
+        osu_mod |= 8
+        osu_mods.append("Hidden")
+    return osu_mod, osu_mods

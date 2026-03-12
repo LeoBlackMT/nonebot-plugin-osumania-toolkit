@@ -32,7 +32,8 @@ def analyze_time_domain(data: dict) -> dict:
         reason: 原因描述
     '''
     pressset = data["pressset"]
-    sample_rate = data["fft_analysis"]["peak_frequency"] if data["fft_analysis"]["peak_frequency"] != 0 else data["sample_rate"]
+    sample_rate = data["fft_analysis"]["peak_frequency"] if (data["fft_analysis"] != None and data["fft_analysis"]["peak_frequency"] != 0) else data["sample_rate"]
+    mr_flag = True if data["player_name"] == "ConvertedFromMalody" else False
     
     # 可变内置参数
     max_time=500 # 直方图最大时间(ms)
@@ -85,7 +86,7 @@ def analyze_time_domain(data: dict) -> dict:
     avg_sim = np.mean(sim_matrix[np.triu_indices(n, k=1)]) if n > 1 else 0
     similarity_percent = avg_sim * 100
     
-    if sample_rate > LOW_SR:
+    if sample_rate > LOW_SR and not mr_flag:
         # 2. 构建1ms精度直方图（用于异常高峰检测）
         bins = int(max_time / bin_width)
         hist_all, bin_edges = np.histogram(all_data, bins=bins, range=(0, max_time))
@@ -258,7 +259,7 @@ def analyze_pulse_spectrum(data: dict) -> dict:
     """
     press_times = data["press_times"]
     intervals = data["intervals"]
-    sample_rate = data["fft_analysis"]["peak_frequency"] if data["fft_analysis"]["peak_frequency"] != 0 else data["sample_rate"]
+    sample_rate = data["fft_analysis"]["peak_frequency"] if (data["fft_analysis"] != None and data["fft_analysis"]["peak_frequency"] != 0) else data["sample_rate"]
 
     if not press_times or not intervals:
         return {
@@ -267,6 +268,12 @@ def analyze_pulse_spectrum(data: dict) -> dict:
             "reason": "频谱分析失败，无有效按键事件"
         }
 
+    if data["player_name"] == "ConvertedFromMalody":
+        return {
+            "cheat": False,
+            "sus": False,
+            "reason": "频谱分析: 无法对mr分析。"
+        }
     # 如果采样率未估算，重新计算
     if sample_rate is None or sample_rate == float('inf'):
         if intervals:
