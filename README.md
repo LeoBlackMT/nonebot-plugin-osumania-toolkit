@@ -16,11 +16,11 @@
 8. **文件格式支持** - 支持.osr、.mr、.osu、.mc多种文件格式
 
 ## Todo
-- [x]支持malody文件格式.mr与.mc
-- [x]支持rework图包
-- [ ]计算单曲acc，支持提供谱面自动划分各单曲物量
-- [ ]支持.mr转换到.osr
-- [ ]分析谱面键型（基于interlude）
-- [ ]由回放与谱面转换成绩
-- [ ]修复.mr在rework和analyze上可能导致的问题
-- [ ]尝试添加对.mrv的支持
+- ~~支持malody文件格式.mr与.mc~~
+- ~~支持rework图包~~
+- 计算单曲acc，支持提供谱面自动划分各单曲物量
+- 支持.mr转换到.osr
+- 分析谱面键型（基于interlude）
+- 由回放与谱面转换成绩
+- 修复.mr在rework和analyze上可能导致的问题
+- 尝试添加对.mrv的支持
