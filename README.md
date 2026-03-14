@@ -15,6 +15,21 @@
 7. **散点图分析 (Scatter)** - 显示打击位置的二维散点图
 8. **文件格式支持** - 支持.osr、.mr、.osu、.mc多种文件格式
 
+## 配置说明
+| 配置项 | 是否必填 | 类型 | 默认值 | 说明 |
+|:-----:|:----:|:----:|:----:|:----:|
+| omtk_cache_max_age | 否 | int | 24 | 缓存文件最大保留时间（小时） |
+| bin_max_time | 否 | int | 500 | 按压分布直方图最大时间（ms） |
+| bin_width | 否 | int | 1 | 按压分布直方图最大bin数 |
+| sim_right_cheat_threshold | 否 | float | 0.99 | 轨道相似度上作弊阈值 |
+| sim_right_sus_threshold | 否 | float | 0.985 | 轨道相似度上可疑阈值 |
+| sim_left_cheat_threshold | 否 | float | 0.4 | 轨道相似度下作弊阈值 |
+| sim_left_sus_thresholdS | 否 | float | 0.55 | 轨道相似度下可疑阈值 |
+| abnormal_peak_threshold | 否 | float | 0.33 | 异常高峰占比阈值 |
+| low_sample_rate_threshold | 否 | float | 165 | 低采样率阈值 |
+| default_convert_od | 否 | int | 8 | .mc转.osu的默认OverallDifficulty值 |
+| default_convert_hp | 否 | int | 8 | .mc转.osu的默认HPDrainRate值 |
+
 ## Todo
 - ~~支持malody文件格式.mr与.mc~~
 - ~~支持rework图包~~

@@ -3,12 +3,16 @@ import asyncio
 import traceback
 
 from scipy.fft import fft, fftfreq
-from collections import Counter
 from scipy.signal import find_peaks
-
+from nonebot import get_plugin_config
 from ..algorithm.utils import match_notes_and_presses
+
+from collections import Counter
 from ..file.osr_file_parser import osr_file
 from ..file.osu_file_parser import osu_file
+from ..config import Config
+
+config = get_plugin_config(Config)
 
 async def run_analyze_cheating(osr_obj: osr_file, osu_obj: osu_file=None):
     loop = asyncio.get_running_loop()
@@ -33,17 +37,10 @@ def analyze_time_domain(data: dict) -> dict:
     '''
     pressset = data["pressset"]
     sample_rate = data["fft_analysis"]["peak_frequency"] if (data["fft_analysis"] != None and data["fft_analysis"]["peak_frequency"] != 0) else data["sample_rate"]
+    # 检查是否由 .mr 文件转换
     mr_flag = True if data["player_name"] == "ConvertedFromMalody" else False
     
-    # 可变内置参数
-    max_time=500 # 直方图最大时间(ms)
-    bin_width=1 # 直方图bin数
-    sim_RthresholdC=0.99 # 轨道相似度上作弊阈值
-    sim_RthresholdS=0.98 # 轨道相似度上可疑阈值
-    sim_LthresholdC=0.4 # 轨道相似度下作弊阈值
-    sim_LthresholdS=0.55 # 轨道相似度下可疑阈值
-    abnormal_peak_threshold = 0.33 # 异常高峰占比阈值
-    LOW_SR = 165 # 低采样率阈值
+    max_time = config.bin_max_time # 直方图最大时间(ms)
     SHORT_BAND = (0, 25) # 短按区间 [0,25) ms
     LONG_BAND = (100, max_time) # 长按区间 [100,500) ms
     
@@ -86,9 +83,9 @@ def analyze_time_domain(data: dict) -> dict:
     avg_sim = np.mean(sim_matrix[np.triu_indices(n, k=1)]) if n > 1 else 0
     similarity_percent = avg_sim * 100
     
-    if sample_rate > LOW_SR and not mr_flag:
+    if sample_rate > config.low_sample_rate_threshold and not mr_flag:
         # 2. 构建1ms精度直方图（用于异常高峰检测）
-        bins = int(max_time / bin_width)
+        bins = int(max_time / config.bin_width)
         hist_all, bin_edges = np.histogram(all_data, bins=bins, range=(0, max_time))
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -107,13 +104,13 @@ def analyze_time_domain(data: dict) -> dict:
             return False, None, None
 
         # 短按区间：
-        short_abnormal, short_count, short_time = check_band(SHORT_BAND[0], SHORT_BAND[1], abnormal_peak_threshold)
+        short_abnormal, short_count, short_time = check_band(SHORT_BAND[0], SHORT_BAND[1], config.abnormal_peak_threshold)
         if short_abnormal:
             abnormal_peak = True
             reasons.append(f"{short_time:.0f}ms出现异常高峰({short_count}次)")
 
         # 长按区间：
-        long_abnormal, long_count, long_time = check_band(LONG_BAND[0], LONG_BAND[1], abnormal_peak_threshold)
+        long_abnormal, long_count, long_time = check_band(LONG_BAND[0], LONG_BAND[1], config.abnormal_peak_threshold)
         if long_abnormal:
             abnormal_peak = True
             reasons.append(f"{long_time:.0f}ms出现异常高峰({long_count}次)")
@@ -137,18 +134,18 @@ def analyze_time_domain(data: dict) -> dict:
     # 5. 综合判定
     cheat = False
     suspicious = False
-    if avg_sim > sim_RthresholdC:
+    if avg_sim > config.sim_right_cheat_threshold:
         cheat = True
         suspicious = True
         reasons.append(f"轨道相似度极高({similarity_percent:.1f}%)")
-    if avg_sim < sim_LthresholdC:
+    if avg_sim < config.sim_left_cheat_threshold:
         cheat = True
         suspicious = True
         reasons.append(f"轨道相似度极低({similarity_percent:.1f}%)")
-    if avg_sim > sim_RthresholdS and not cheat:
+    if avg_sim > config.sim_right_sus_threshold and not cheat:
         suspicious = True
         reasons.append(f"轨道相似度过高({similarity_percent:.1f}%)")
-    if avg_sim < sim_LthresholdS and not cheat:
+    if avg_sim < config.sim_left_sus_thresholdS and not cheat:
         suspicious = True
         reasons.append(f"轨道相似度过低({similarity_percent:.1f}%)")
     if abnormal_peak:

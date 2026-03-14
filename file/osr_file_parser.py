@@ -94,6 +94,13 @@ class ReplayEvent:
 
 class osr_file:
     def __init__(self, file_path):
+        """
+        初始化osr回放对象。
+        部分内容来自 https://github.com/adgjl7777777/VSRG_Total_Analyzer/blob/master/main.py
+
+        Args:
+            file_path (str): osr文件位置。
+        """
         self.file_path = file_path
         self.status = "init"
         self._init_derived_attrs()

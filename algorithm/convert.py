@@ -5,11 +5,15 @@ import datetime
 from collections import Counter
 from typing import Optional
 from nonebot.log import logger
+from nonebot import get_plugin_config
 
 from ..algorithm.utils import malody_mods_to_osu_mods
 
 from ..file.osr_file_parser import osr_file, ReplayEvent
 from ..file.mr_file_parser import mr_file
+from ..config import Config
+
+config = get_plugin_config(Config)
 
 # 辅助函数
 def ms(beats, bpm, offset):
@@ -24,6 +28,7 @@ def col(column, keys):
 def convert_mc_to_osu(mc_file_path: str, output_dir: Optional[str] = None) -> str:
     """
     将 .mc 文件转换为 .osu 文件
+    本函数修改自 https://github.com/Jakads/malody2osu/blob/master/convert.py
     
     Args:
         mc_file_path: .mc 文件路径
@@ -146,9 +151,9 @@ def convert_mc_to_osu(mc_file_path: str, output_dir: Optional[str] = None) -> st
         'BeatmapSetID:-1',
         '',
         '[Difficulty]',
-        'HPDrainRate:8',
+        f'HPDrainRate:{config.default_convert_hp}',
         f'CircleSize:{keys}',
-        'OverallDifficulty:8', # 默认od8
+        f'OverallDifficulty:{config.default_convert_od}',
         'ApproachRate:5',
         'SliderMultiplier:1.4',
         'SliderTickRate:1',

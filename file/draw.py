@@ -59,6 +59,7 @@ async def run_plot_comprehensive(output_dir: str, osr_obj: osr_file, osu_obj: os
 def plot_pressingtime(osr_obj: osr_file, output_dir: str) -> str:
     """
     绘制按压时长分布图（各轨道颜色区分）
+    本函数修改自 https://github.com/adgjl7777777/VSRG_Total_Analyzer/blob/master/graph.py
     参数:
         osr_obj: osr_file 实例（已 process）
         output_dir: 输出目录
@@ -373,6 +374,9 @@ def plot_comprehensive(output_dir: str, osr_obj: osr_file, osu_obj: osu_file = N
     
     # 使用 parser 中提供的 corrector（parser 已对时间数据做了统一缩放）
     corrector = data.get("corrector", 1.0)
+    
+    # 匹配
+    delta_list, matched_pairs = match_notes_and_presses(osu_obj, osr_obj)
 
     # 构建按压分布图数据
     basetime = []
@@ -446,7 +450,6 @@ def plot_comprehensive(output_dir: str, osr_obj: osr_file, osu_obj: osu_file = N
         ax2.grid(alpha=0.3)
 
         # 左下：delta_t 直方图
-        delta_list, _ = match_notes_and_presses(osu_obj, osr_obj)
         if delta_list:
             deltas = [d for _, d in delta_list]
             # 根据数据范围自动调整 bins
@@ -474,7 +477,6 @@ def plot_comprehensive(output_dir: str, osr_obj: osr_file, osu_obj: osu_file = N
             ax3.set_title('Delta t Distribution')
 
         # 右下：delta_t 散点图
-        _, matched_pairs = match_notes_and_presses(osu_obj, osr_obj)
         if matched_pairs:
             note_times = [p[1] for p in matched_pairs]
             deltas_scatter = [p[2] - p[1] for p in matched_pairs]
