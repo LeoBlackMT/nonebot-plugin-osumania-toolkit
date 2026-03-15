@@ -32,14 +32,11 @@
 | default_convert_hp | 否 | int | 8 | .mc转.osu的默认HPDrainRate值 |
 
 ## Todo
-- ~~支持malody文件格式.mr与.mc~~
-- ~~支持rework图包~~
 - ~~计算单曲acc，支持提供谱面自动划分各单曲物量~~
-- 单曲acc计算支持scoreV2
-- 单曲acc计算提供文件时，支持自定义单曲个数
+- ~~单曲acc计算支持scoreV2~~
+- ~~单曲acc计算提供文件时，支持自定义单曲个数~~
+- 添加更多内置段位
 - 支持修改投皮
-- ~~支持.mr转换到.osr~~
-  - 由于转换后的回放文件通常无法根据hash找到谱面文件(原始文件是.mc, osu读不了)，该功能不再开发。
 - 分析谱面键型（基于interlude）
 - 由回放与谱面转换成绩
 - ~~修复.mr在rework和analyze上可能导致的问题~~

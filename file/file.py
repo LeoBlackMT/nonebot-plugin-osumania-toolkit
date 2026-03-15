@@ -162,13 +162,47 @@ async def download_file_by_id(cache_dir: Path, map_id: int) -> tuple[Path, str]:
 
 
 async def cleanup_temp_file(file_path: Path, delay: float = 10.0):
+    # 兼容旧接口
+    await cleanup_paths(file_path, delay=delay)
+
+
+async def cleanup_paths(*paths, delay: float = 10.0):
+    """
+    批量清理临时文件路径。
+
+    参数:
+        *paths: 任意数量的路径参数，支持 Path/str/None。
+        delay: 延迟清理时间（秒）。防止用户连续发送命令时过快清理文件导致错误。
+    """
     await asyncio.sleep(delay)
-    try:
-        if file_path.exists():
-            file_path.unlink()
-            logger.debug(f"已清理临时文件：{file_path}")
-    except Exception as e:
-        logger.warning(f"清理文件失败：{e}")
+
+    seen = set()
+    for path in paths:
+        if path is None:
+            continue
+
+        try:
+            file_path = Path(path)
+        except Exception:
+            continue
+
+        key = str(file_path)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if not file_path.exists():
+            continue
+
+        try:
+            if file_path.is_dir():
+                shutil.rmtree(file_path)
+                logger.debug(f"已清理临时目录：{file_path}")
+            else:
+                file_path.unlink()
+                logger.debug(f"已清理临时文件：{file_path}")
+        except Exception as e:
+            logger.warning(f"清理路径失败：{e}")
 
 
 def cleanup_old_cache(cache_dir: Path, max_age_hours: int = 24):

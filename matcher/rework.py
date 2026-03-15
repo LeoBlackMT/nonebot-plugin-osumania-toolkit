@@ -103,7 +103,7 @@ async def handle_rework(bot: Bot, event: MessageEvent):
                     osu_obj = osu_file(chart_file)
                     osu_obj.process()
                     meta_data = osu_obj.meta_data
-                await rework.send(get_rework_result_text(meta_data, mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), to_sender=True)
+                await rework.send(get_rework_result_text(meta_data, mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), at_sender=True)
                 
         except Exception as e:
             if str(e) == "ParseError":
@@ -128,7 +128,7 @@ async def handle_rework(bot: Bot, event: MessageEvent):
                 await rework.finish(f"未找到谱面: b{bid}")
                 
             sr, LN_ratio, column_count = await get_rework_result(str(tmp_file), speed_rate, od_flag, cvt_flag)
-            await rework.send(get_rework_result_text(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), to_sender=True)
+            await rework.send(get_rework_result_text(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), at_sender=True)
         except FinishedException:
             pass
         except Exception as e:

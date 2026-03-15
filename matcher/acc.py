@@ -1,6 +1,7 @@
 import os
 import asyncio
 import re
+from pathlib import Path
 
 from nonebot import on_command
 from nonebot.params import Arg, CommandArg
@@ -11,7 +12,7 @@ from nonebot.exception import FinishedException, RejectedException
 
 from nonebot_plugin_localstore import get_plugin_cache_dir
 
-from ..file.file import safe_filename, download_file, cleanup_temp_file, get_file_url, download_file_by_id
+from ..file.file import safe_filename, download_file, cleanup_paths, get_file_url, download_file_by_id
 from ..algorithm.acc_calculate import (
     calculate_acc_from_dan, 
     calculate_acc,
@@ -21,6 +22,8 @@ from ..algorithm.acc_calculate import (
     get_acc_result_text,
 )
 from ..algorithm.utils import parse_osu_filename
+from ..algorithm.utils import is_mc_file
+from ..algorithm.convert import convert_mc_to_osu
 
 CACHE_DIR = get_plugin_cache_dir()
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -30,13 +33,13 @@ acc = on_command("acc", aliases={"单曲"}, block=True)
 @acc.handle()
 async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State, cmd: Message = CommandArg()):
     cmd_text = event.get_plaintext().strip()
-    dan_name, acc_str, bid, num_songs, error_msg = parse_acc_cmd(cmd_text)
+    dan_name, acc_str, bid, num_songs, sv2_flag, error_msg = parse_acc_cmd(cmd_text)
     
     state["status"] = "init"
     
     if error_msg:
         state["status"] = "Fail"
-        await acc.finish(f"错误: {error_msg}")
+        await acc.finish(f"错误: {'\n'.join(error_msg)}")
         
     # 初始化所有state
     state["acc_str"] = acc_str
@@ -48,6 +51,9 @@ async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State
     state["osu_path"] = ""
     state["osu_name"] = None
     state["reject_time"] = 0
+    state["sv2_flag"] = sv2_flag
+    state["downloaded_path"] = None
+    state["converted_path"] = None
     
     # bid模式
     if bid:
@@ -66,7 +72,7 @@ async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State
                 state["display_name"] = osu_name
             
             # 计算各单曲物量
-            note_counts = await calculate_map_notes(osu_path, num_songs)
+            note_counts = await calculate_map_notes(osu_path, num_songs, sv2_flag)
             state["note_counts"] = note_counts
             
             if acc_str:
@@ -81,18 +87,24 @@ async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State
                 return
         
         except FinishedException:
-            pass
+            raise
         except Exception as e:
             state["status"] = "Fail"
             await acc.send(f"处理谱面时出错: {str(e)}")
             return
         finally:
-            osu_path = state.get("osu_path")
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
     
     # 给定段位名模式
     elif dan_name and acc_str:
+        if not validate_dan_name(dan_name, sv2_flag): # 二次验证，确保段位名和 sv2 标志匹配，否则后续计算会出问题
+            await acc.reject(f"当前段位{dan_name}暂不支持ScoreV2, 或段位名有误。请确认段位名或移除 -sv2 参数，或重新输入段位名:")
         state["mode"] = "predefined"
         if acc_str:
             state["status"] = "Ready"
@@ -101,7 +113,8 @@ async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State
             return
         else:
             # 只有段位名，需要ACC字符串
-            await acc.send(f"已选择段位: {dan_name}\n请输入ACC变化 (格式: acc1-acc2-acc3-acc4...):")
+            sv2_msg = " (+ScoreV2)" if state.get("sv2_flag", False) else ""
+            await acc.send(f"已选择段位: {dan_name}{sv2_msg}\n请输入ACC变化 (格式: acc1-acc2-acc3-acc4...):")
     
     # 用户未提供任何信息，进入交互模式，需要先询问段位名或谱面
     else:
@@ -118,10 +131,14 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
     
     match state["status"]:
         case "Finish" | "Fail":
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
             await acc.finish()
-            osu_path = state["osu_path"]
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
         case "Ready":
             # 数据已满足计算条件，到第二个got统一计算
             matcher.set_arg("handle_third", message) # 跳转到第二个got
@@ -150,17 +167,36 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
         file_name, file_url = file_info
         file_name = os.path.basename(file_name)
         
-        # todo: 新增对.mc文件的支持
-        if not file_name.lower().endswith('.osu'):
+        if not file_name.lower().endswith(('.osu', '.mc')):
             state["status"] = "Fail"
-            await acc.finish("请发送.osu格式的谱面文件。")
+            await acc.finish("请发送.osu 或 .mc 格式的谱面文件。")
         
         # 下载文件
-        osu_path = CACHE_DIR / safe_filename(file_name)
-        success = await download_file(file_url, osu_path)
+        downloaded_path = CACHE_DIR / safe_filename(file_name)
+        success = await download_file(file_url, downloaded_path)
         if not success:
             state["status"] = "Fail"
             await acc.finish("文件下载失败，请稍后再试。")
+
+        osu_path = downloaded_path
+        converted_path = None
+        state["downloaded_path"] = downloaded_path
+
+        if file_name.lower().endswith('.mc'):
+            try:
+                if not is_mc_file(str(downloaded_path)):
+                    state["status"] = "Fail"
+                    await acc.finish("无效的 .mc 文件，或不是支持的 key 模式谱面。")
+                converted_path = Path(convert_mc_to_osu(str(downloaded_path), str(CACHE_DIR)))
+                osu_path = converted_path
+                file_name = converted_path.name
+            except FinishedException:
+                raise
+            except Exception as e:
+                state["status"] = "Fail"
+                await acc.finish(f".mc 文件转换失败: {e}")
+
+        state["converted_path"] = converted_path
         
         # 保存到state 进入文件模式
         state["mode"] = "file"
@@ -175,23 +211,8 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
         else:
             state["display_name"] = file_name
         
-        try:
-            # 交互模式下 暂不支持自定义分段数
-            # 猜测如果有file_seg没有text，下载后保存在state中，然后使用reject让用户对发送的文件回复并包含分段数
-            # 此时file_seg和text同时存在，再进行自定义分段数处理 以增加对各种 "How to be like ..."谱面的支持。
-            note_counts = await calculate_map_notes(osu_path, 4)
-            state["note_counts"] = note_counts
-            await acc.send(f"已收到文件: {state["display_name"]}\n谱面物量分布: {'-'.join(str(n) for n in note_counts)}\n请输入ACC变化 (格式: acc1-acc2-acc3-acc4...):")
-            
-        except Exception as e:
-            state["status"] = "Fail"
-            osu_path = state["osu_path"]
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
-            await acc.send(f"处理时出错: {str(e)}")
-            return
-        
-        # 转第二个got，获取acc变化。
+        # 已保存文件并进入文件模式，使用reject重启本handler以获取信息
+        await acc.reject(f"已收到文件: {state['display_name']}\n请对文件回复并发送单曲个数和sv2标识（均可选），用空格分开；或不回复直接发送acc变化。发送0以取消。")
         return
     
     # 不是文件，检查文本输入
@@ -201,6 +222,75 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
     if text_input == '0':
         state["status"] = "Finish"
         await acc.finish("操作已取消。")
+    
+    # 检查是否为acc变化
+    # 从上个reject的文件模式下 获取 acc变化 处理发送的文件并跳转到第三部分
+    if (state["mode"] == "file") and re.match(r'^(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))+$', text_input):
+        state["num_songs"] = 4 # 默认4首歌
+        state["sv2_flag"] = False # 默认不启用 sv2
+        # 处理文件并计算物量，将获取的acc变化字符串注入到第三个got进行计算
+        try:
+            note_counts = await calculate_map_notes(state["osu_path"], state["num_songs"], state.get("sv2_flag", False))
+            state["note_counts"] = note_counts
+        except Exception as e:
+            state["status"] = "Fail"
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
+            await acc.finish(f"处理谱面失败: {e}")
+        matcher.set_arg("handle_third", message) # 跳转到第二个got
+        return
+    
+    # 从上个reject已获取文件，进入文件模式
+    if state["mode"] == "file":
+        # 用户在文件模式下输入了文本，视为分段数和sv2标识
+        parts = [p for p in re.split(r"\s+", text_input) if p]
+        if len(parts) > 2:
+            state["reject_time"] += 1
+            await acc.reject("输入格式错误。请对文件回复并发送单曲个数和sv2标识（均可选），用空格分开；或直接发送acc变化。发送0以取消。请重新输入:")
+        
+        num_songs = None
+        sv2_flag = False
+        
+        for part in parts:
+            if part.isdigit():
+                num = int(part)
+                if num <= 0 or num >= 10:
+                    state["reject_time"] += 1
+                    await acc.reject("单曲个数必须属于区间(0,10)。发送0以取消。请重新输入:")
+                num_songs = num
+            elif part.lower() in {"-sv2", "sv2"}:
+                sv2_flag = True
+            else:
+                state["reject_time"] += 1
+                await acc.reject("无效的输入。请对文件回复并发送单曲个数和sv2标识（均可选），用空格分开；或直接发送acc变化。发送0以取消。请重新输入:")
+        
+        state["num_songs"] = num_songs if num_songs else 4 # 默认4首歌
+        state["sv2_flag"] = sv2_flag
+        
+        # 根据新的分段数重新计算物量并提示用户输入acc变化
+        try:
+            note_counts = await calculate_map_notes(state["osu_path"], state["num_songs"], state.get("sv2_flag", False))
+            state["note_counts"] = note_counts
+            sv2_msg = " (+ScoreV2)" if state.get("sv2_flag", False) else ""
+            acc_format = "-".join([f"acc{i+1}" for i in range(len(note_counts))])
+            await acc.send(f"已设置分段数: {state['num_songs']}{sv2_msg}\n谱面物量分布: {'-'.join(str(n) for n in note_counts)}\n请输入ACC变化 (格式: {acc_format}):")
+            # 跳转到handle_third获取acc变化
+            return
+        except Exception as e:
+            state["status"] = "Fail"
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
+            await acc.finish(f"处理谱面失败: {e}")
     
     # 检查是否是自定义物量格式 (int,int,int...)
     if re.match(r'^\d+(?:,\d+)+$', text_input):
@@ -239,15 +329,28 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
             await acc.send(f"处理过程发生错误: {e}")
             return
     
-    # 检查是否是段位名
-    if validate_dan_name(text_input):
+    # 检查混合输入，包含段位名和sv2标识。例如 "regular1 -sv2" 或 "-sv2 regular1"
+    parts = [p for p in re.split(r"\s+", text_input) if p]
+    has_sv2 = any(p.lower() in {"-sv2", "sv2"} for p in parts)
+    # 去掉 sv2 标记后的文本
+    core_parts = [p for p in parts if p.lower() not in {"-sv2", "sv2"}]
+    core_text = " ".join(core_parts).strip()
+    
+    # 如果 core_text 存在且为段位名，允许同时包含 sv2 标志
+    if core_text and validate_dan_name(core_text, True if has_sv2 else None):
+        # 若用户在输入中包含 sv2，则将其写入 state
+        if has_sv2:
+            state["sv2_flag"] = True
         state["mode"] = "predefined"
-        state["dan_name"] = text_input
-        await acc.send(f"已选择段位: {text_input}\n请输入ACC变化 (格式: acc1-acc2-acc3-acc4...):")
+        state["dan_name"] = core_text
+        sv2_msg = " (+ScoreV2)" if state.get("sv2_flag", False) else ""
+        await acc.send(f"已选择段位: {core_text}{sv2_msg}\n请输入ACC变化 (格式: acc1-acc2-acc3-acc4...):")
         return
+
+    # 原有段位匹配降级：如果没有核心文本或不匹配，则继续下一步的 acc 变化匹配或报错
     
     # 检查是否为acc变化
-    # 获取 acc变化 并跳转到第三部分
+    # 在预定义段位和bid模式下 获取 acc变化 并跳转到第三部分
     if (state["mode"] == "predefined" or state["mode"] == "bid") and re.match(r'^(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))+$', text_input):
         matcher.set_arg("handle_third", message) # 跳转到第二个got
         return
@@ -257,17 +360,21 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
     await acc.reject("输入无效。请根据上一个消息的提示发送正确的内容，或输入0取消操作。\n请重新输入:")
 
 @acc.got("handle_third")
-async def acc_handle_third(matcher: Matcher, state: T_State, message: Message = Arg("handle_third")):
+async def acc_handle_third(state: T_State, message: Message = Arg("handle_third")):
     """
     第三个handle
     获取ACC字符串与计算结果
     """
     match state["status"]:
         case "Finish" | "Fail":
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
             await acc.finish()
-            osu_path = state["osu_path"]
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
         case _:
             pass
     
@@ -280,9 +387,13 @@ async def acc_handle_third(matcher: Matcher, state: T_State, message: Message = 
         msg_text = message.extract_plain_text().strip()
         if msg_text == '0':
             state["status"] = "Finish"
-            osu_path = state["osu_path"]
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
             await acc.finish("已取消操作")
         if re.match(r'^(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))+$', msg_text):
             state["acc_str"] = msg_text
@@ -306,24 +417,35 @@ async def acc_handle_third(matcher: Matcher, state: T_State, message: Message = 
             if not dan_name:
                 state["status"] = "Fail"
                 await acc.finish("错误: 未获取到段位名")
-            
+                
             single_accs, calc_error = calculate_acc_from_dan(dan_name, state["acc_str"])
             if calc_error:
                 state["status"] = "Fail"
                 await acc.finish(f"计算错误: {calc_error}")
 
-            result_msg = get_acc_result_text("predefined", dan_name, None, state["acc_str"], single_accs)
+            result_msg = get_acc_result_text(
+                "predefined",
+                dan_name,
+                None,
+                state["acc_str"],
+                single_accs,
+                state.get("sv2_flag", False)
+            )
             
         except FinishedException:
-            pass
+            raise
         except Exception as e:
             state["status"] = "Fail"
             await acc.send(f"发生错误：{e}")
             return
         finally:
-            osu_path = state["osu_path"]
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
     
     elif mode in ["bid", "file", "custom"]:
         # 谱面或自定义物量模式
@@ -341,18 +463,29 @@ async def acc_handle_third(matcher: Matcher, state: T_State, message: Message = 
                 await acc.finish(f"计算错误: {calc_error}")
             
             # 构建结果消息
-            result_msg = get_acc_result_text(mode, display_name, note_counts, state["acc_str"], single_accs)
+            result_msg = get_acc_result_text(
+                mode,
+                display_name,
+                note_counts,
+                state["acc_str"],
+                single_accs,
+                False # sv2_flag在谱面模式下不影响计算结果，传False
+            )
             
         except FinishedException:
-            pass
+            raise
         except Exception as e:
             state["status"] = "Fail"
             await acc.send(f"发生错误：{e}")
             return
         finally:
-            osu_path = state["osu_path"]
-            if osu_path and osu_path.exists():
-                asyncio.create_task(cleanup_temp_file(osu_path))
+            asyncio.create_task(
+                cleanup_paths(
+                    state.get("osu_path"),
+                    state.get("downloaded_path"),
+                    state.get("converted_path")
+                )
+            )
     else:
         state["status"] = "Fail"
         await acc.finish("错误: 未知模式")
@@ -362,5 +495,39 @@ async def acc_handle_third(matcher: Matcher, state: T_State, message: Message = 
     await acc.finish(result_msg, at_sender=True)
     return
     
-    
-    # 计划支持 scoreV2，增强谱面物量计算。
+"""
+流程说明：
+    - handler_first:
+        - 用户未提供参数: 进入交互模式 -> handler_second (获取段位名或谱面文件或自定义物量)
+        - 用户只提供段位名: 进入预定义段位模式 -> handler_second (获取acc字符串)
+        - 用户只提供bid: 进入谱面模式 -> handler_second (获取acc字符串)
+        - 用户同时提供bid和acc字符串: 进入谱面模式 (标记Ready) -> handler_second
+        - 用户同时提供段位名和acc字符串: 进入预定义段位模式 (标记Ready) -> handler_second
+        - 用户输入错误: 提示错误并重试，超过次数则标记Fail -> handler_second
+        - 程序发生异常: 标记Fail -> handler_second
+        
+    - handler_second:
+        - Finish或Fail状态: 清理临时文件并结束
+        - Ready状态: -> handler_third (计算并发送结果)
+        - 用户输入0: 取消操作，标记Finish并结束
+        - 用户发送了文件: 进入文件模式 (记录必要信息) -> (reject) handler_second (获取其他信息，如分段数)
+        - 当前为文件模式且用户输入了非acc字符串: 视为分段数和sv2标识 -> handler_third (获取acc字符串)
+        - 当前为文件模式且用户输入了acc字符串: 在文件模式下记录信息 -> 将acc字符串传入并跳转 handler_third (计算并发送结果)
+        - 用户输入了自定义物量: 进入自定义物量模式 -> handler_third (计算并发送结果)
+        - 用户输入了段位名: 进入预定义段位模式 -> handler_third (计算并发送结果)
+        - 用户输入了acc字符串: 如果之前已获取段位名或谱面，进入相应模式 -> 将acc字符串传入并跳转 handler_third (计算并发送结果)
+        - 用户输入错误: 提示错误并重试，超过次数则标记Fail -> handler_third
+        - 程序发生异常: 标记Fail -> handler_third
+
+    - handler_third:
+        - Finish或Fail状态: 清理临时文件并结束
+        - 用户输入0: 取消操作，标记Finish并结束
+        - Ready状态: 根据mode进行计算，生成结果消息并发送，标记Finish
+        - 否则获取用户输入的acc字符串，进行计算，生成结果消息并发送，标记Finish
+        - 用户输入错误: 提示错误并重试，超过次数则标记Fail
+        - 程序发生异常: 标记Fail
+        
+计划
+    - 增强谱面物量计算，或修复潜在的问题
+    - 增加更多内置段位
+"""

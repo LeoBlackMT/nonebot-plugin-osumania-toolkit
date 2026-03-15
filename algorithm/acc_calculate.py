@@ -3,70 +3,72 @@ import asyncio
 from typing import Tuple, List
 from pathlib import Path
 
+from ..file.osu_file_parser import osu_file
+
 # ==================== 内置单曲数据 ====================
 
 def acc_data():
     """
     段位物量数据
     数据来源：https://github.com/Ohdmire/nonebot-plugin-acc-calculate/blob/main/nonebot_plugin_acc_calculate/database.py
-    返回: dict, 键为段位名，值为物量列表
+    返回: dict, 键为段位名，值为[sv2_flag, note1, note2, ...]
     """
     return {
-        "regular0": [492, 529, 595, 681],
-        "regular1": [695, 621, 718, 1279],
-        "regular2": [1397, 1090, 805, 1212],
-        "regular3": [1055, 1489, 1288, 1788],
-        "regular4": [1865, 1434, 1284, 1839],
-        "regular5": [1282, 1706, 1473, 1939],
-        "regular6": [1694, 1636, 1803, 2115],
-        "regular7": [1701, 1799, 2132, 1899],
-        "regular8": [2237, 2081, 2280, 2000],
-        "regular9": [2374, 1889, 2142, 1814],
-        "regular10": [2034, 1740, 2270, 2166],
-        "ex1": [1952, 2013, 1953, 2111],
-        "ex2": [2107, 1953, 2386, 2674],
-        "ex3": [2518, 2636, 2326, 2511],
-        "ex4": [2634, 2212, 2336, 2602],
-        "ex5": [2734, 2417, 3089, 2974],
-        "ex6": [2483, 2276, 2921, 3194],
-        "ex7": [2846, 2260, 2333, 3347],
-        "ex8": [3789, 3663, 2424, 3255],
-        "ex9": [3888, 3030, 3581, 3700],
-        "exfinal": [2828, 3362, 3393, 5100],
-        "regular1v2": [813, 955, 907, 654],
-        "regular2v2": [1152, 850, 950, 969],
-        "regular3v2": [1169, 1143, 974, 1347],
-        "regular4v2": [1400, 1402, 1685, 1599],
-        "regular5v2": [1953, 2250, 2166, 1667],
-        "regular6v2": [1487, 1424, 1381, 1587],
-        "regular7v2": [1909, 1814, 1777, 2681],
-        "regular8v2": [1962, 1067, 2388, 1772],
-        "regular9v2": [1799, 2023, 2283, 1787],
-        "regular10v2": [2606, 2188, 2194, 2187],
-        "ex1v2": [2160, 1952, 1821, 3249],
-        "ex2v2": [2871, 2024, 1871, 2452],
-        "ex3v2": [2327, 1593, 2166, 2200],
-        "ex4v2": [2731, 2653, 2033, 2761],
-        "ex5v2": [3229, 2731, 2561, 2109],
-        "ex6v2": [1766, 1861, 3171, 1680],
-        "ex7v2": [2339, 2461, 2511, 2177],
-        "ex8v2": [1929, 2380, 2710, 4675],
-        "exfinalv2": [3468, 3335, 3698, 5061],
-        "reform1": [878, 696, 954, 1167],
-        "reform2": [1107, 905, 955, 1487],
-        "reform3": [905, 797, 1047, 1560],
-        "reform4": [980, 1499, 1283, 2071],
-        "reform5": [1293, 1494, 1126, 1903],
-        "reform6": [1487, 1266, 1749, 2186],
-        "reform7": [2114, 1777, 1081, 2734],
-        "reform8": [2177, 1309, 1608, 1589],
-        "reform9": [2144, 2070, 1674, 2272],
-        "reform10": [1906, 1460, 1723, 2392],
-        "reforma": [2265, 1528, 2300, 3334],
-        "reformb": [2274, 2308, 1740, 2301],
-        "reformg": [1973, 1980, 1429, 3976],
-        "reformd": [2018, 2711, 3140, 2629],
-        "reforme": [2128, 2552, 2194, 2829]
+        "regular0": [False, 492, 529, 595, 681],
+        "regular1": [False, 695, 621, 718, 1279],
+        "regular2": [False, 1397, 1090, 805, 1212],
+        "regular3": [False, 1055, 1489, 1288, 1788],
+        "regular4": [False, 1865, 1434, 1284, 1839],
+        "regular5": [False, 1282, 1706, 1473, 1939],
+        "regular6": [False, 1694, 1636, 1803, 2115],
+        "regular7": [False, 1701, 1799, 2132, 1899],
+        "regular8": [False, 2237, 2081, 2280, 2000],
+        "regular9": [False, 2374, 1889, 2142, 1814],
+        "regular10": [False, 2034, 1740, 2270, 2166],
+        "ex1": [False, 1952, 2013, 1953, 2111],
+        "ex2": [False, 2107, 1953, 2386, 2674],
+        "ex3": [False, 2518, 2636, 2326, 2511],
+        "ex4": [False, 2634, 2212, 2336, 2602],
+        "ex5": [False, 2734, 2417, 3089, 2974],
+        "ex6": [False, 2483, 2276, 2921, 3194],
+        "ex7": [False, 2846, 2260, 2333, 3347],
+        "ex8": [False, 3789, 3663, 2424, 3255],
+        "ex9": [False, 3888, 3030, 3581, 3700],
+        "exfinal": [False, 2828, 3362, 3393, 5100],
+        "regular1v2": [False, 813, 955, 907, 654],
+        "regular2v2": [False, 1152, 850, 950, 969],
+        "regular3v2": [False, 1169, 1143, 974, 1347],
+        "regular4v2": [False, 1400, 1402, 1685, 1599],
+        "regular5v2": [False, 1953, 2250, 2166, 1667],
+        "regular6v2": [False, 1487, 1424, 1381, 1587],
+        "regular7v2": [False, 1909, 1814, 1777, 2681],
+        "regular8v2": [False, 1962, 1067, 2388, 1772],
+        "regular9v2": [False, 1799, 2023, 2283, 1787],
+        "regular10v2": [False, 2606, 2188, 2194, 2187],
+        "ex1v2": [False, 2160, 1952, 1821, 3249],
+        "ex2v2": [False, 2871, 2024, 1871, 2452],
+        "ex3v2": [False, 2327, 1593, 2166, 2200],
+        "ex4v2": [False, 2731, 2653, 2033, 2761],
+        "ex5v2": [False, 3229, 2731, 2561, 2109],
+        "ex6v2": [False, 1766, 1861, 3171, 1680],
+        "ex7v2": [False, 2339, 2461, 2511, 2177],
+        "ex8v2": [False, 1929, 2380, 2710, 4675],
+        "exfinalv2": [False, 3468, 3335, 3698, 5061],
+        "reform1": [False, 878, 696, 954, 1167],
+        "reform2": [False, 1107, 905, 955, 1487],
+        "reform3": [False, 905, 797, 1047, 1560],
+        "reform4": [False, 980, 1499, 1283, 2071],
+        "reform5": [False, 1293, 1494, 1126, 1903],
+        "reform6": [False, 1487, 1266, 1749, 2186],
+        "reform7": [False, 2114, 1777, 1081, 2734],
+        "reform8": [False, 2177, 1309, 1608, 1589],
+        "reform9": [False, 2144, 2070, 1674, 2272],
+        "reform10": [False, 1906, 1460, 1723, 2392],
+        "reforma": [False, 2265, 1528, 2300, 3334],
+        "reformb": [False, 2274, 2308, 1740, 2301],
+        "reformg": [False, 1973, 1980, 1429, 3976],
+        "reformd": [False, 2018, 2711, 3140, 2629],
+        "reforme": [False, 2128, 2552, 2194, 2829]
     }
 
 # ==================== 计算函数 ====================
@@ -134,14 +136,20 @@ def calculate_acc_from_dan(dan_name, acc_str) -> Tuple:
     data = acc_data()
     if dan_name not in data:
         return None, f"段位 '{dan_name}' 不存在。"
-    note_counts = data[dan_name]
-    
+
+    entry = data[dan_name]
+    # en结构: [sv2_flag, note1, note2, ...]
+    if isinstance(entry, (list, tuple)) and len(entry) >= 1:
+        note_counts = list(entry[1:])
+    else:
+        note_counts = list(entry)
+
     try:
         single_acc, err_msg = calculate_acc(note_counts, acc_str)
         if err_msg:
             return None, err_msg
         return single_acc, None
-        
+
     except ValueError as e:
         return None, f"格式错误: {str(e)}"
     except Exception as e:
@@ -157,7 +165,7 @@ def parse_acc_cmd(cmd_text: str) -> Tuple:
         cmd_text: str, 命令文本
     
     返回:
-        tuple: (段位名, ACC字符串, bid, num_songs, 错误信息)
+        tuple: (段位名, ACC字符串, bid, num_songs, sv2_flag, 错误信息)
     """
     # 移除命令前缀
     cmd_text = cmd_text.strip()
@@ -168,7 +176,7 @@ def parse_acc_cmd(cmd_text: str) -> Tuple:
             break
     
     if not cmd_text:
-        return None, None, None, 4, None  # 进入交互模式 默认4段
+        return None, None, None, 4, False, None  # 进入交互模式 默认4段
     
     cmd_parts = cmd_text.split()
     err_msg = []
@@ -177,11 +185,18 @@ def parse_acc_cmd(cmd_text: str) -> Tuple:
     num_songs = 4
     acc_str = None
     dan_name = None
+    sv2_flag = False
     
     # 解析命令
     i = 0
     while i < len(cmd_parts):
         part = cmd_parts[i]
+
+        # sv2加权模式
+        if part.lower() == "-sv2":
+            sv2_flag = True
+            i += 1
+            continue
         
         # 获取bid
         if part.lower().startswith("b"):
@@ -213,7 +228,7 @@ def parse_acc_cmd(cmd_text: str) -> Tuple:
             continue
         
         # 如果都不是上面的情况 则视为段位名
-        elif validate_dan_name(part):
+        elif validate_dan_name(part, sv2_flag):
             try:
                 dan_name = part
             except ValueError:
@@ -225,7 +240,7 @@ def parse_acc_cmd(cmd_text: str) -> Tuple:
         else:
             i += 1
 
-    return dan_name, acc_str, bid, num_songs, err_msg
+    return dan_name, acc_str, bid, num_songs, sv2_flag, err_msg
 
 def get_available_dans():
     """
@@ -238,25 +253,38 @@ def get_available_dans():
     data.sort()
     return data
 
-def validate_dan_name(dan_name: str):
+def validate_dan_name(dan_name: str, sv2_flag: bool = None):
     """
-    验证段位名是否有效
-    
+    验证段位名是否有效，并可选择性匹配 sv2_flag
+
     参数:
         dan_name: str, 段位名
-    
+        sv2_flag: bool|None: 如果为 True/False，则要求段位数据的首位 sv2_flag 与之匹配；
+                             如果为 None，则只检查段位名是否存在。
+
     返回:
         bool: 是否有效
     """
     data = acc_data()
-    return True if dan_name in data else False
+    if dan_name not in data:
+        return False
+
+    if sv2_flag is None:
+        return True
+
+    entry = data[dan_name]
+    if isinstance(entry, (list, tuple)) and len(entry) >= 1:
+        return bool(entry[0]) == bool(sv2_flag)
+
+    return False
 
 def get_acc_result_text(
     mode: str,
     display_name: str = "",
     note_counts: List = None,
     acc_str: str = "",
-    single_accs: List = None
+    single_accs: List = None,
+    sv2_flag: bool = False
 ) -> str:
     """
     构建ACC计算结果消息
@@ -279,6 +307,9 @@ def get_acc_result_text(
         result_msg += f"\n谱面: {display_name}\n"
         if note_counts:
             result_msg += f"物量分布: {'-'.join(str(n) for n in note_counts)}\n"
+
+    if sv2_flag:
+        result_msg += "Mods: ScoreV2\n"
     
     if acc_str:
         result_msg += f"ACC变化: {acc_str}\n\n"
@@ -294,7 +325,7 @@ def get_acc_result_text(
 
 # ==================== 谱面分析函数 ====================
 
-async def calculate_map_notes(file_path: Path, num_songs: int = 4) -> List:
+async def calculate_map_notes(file_path: Path, num_songs: int = 4, sv2_flag: bool = False) -> List:
     """
     分析谱面物量分布（异步）
     
@@ -306,12 +337,12 @@ async def calculate_map_notes(file_path: Path, num_songs: int = 4) -> List:
         num_songs段物量列表
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, calculate_note_counts, parse_osu_file(file_path), num_songs)
+    return await loop.run_in_executor(None, calculate_note_counts, parse_osu_file(file_path), num_songs, sv2_flag)
 
 def parse_osu_file(file_path: Path) -> List:
     """
     解析.osu文件，提取物件信息
-    从..file.osu_file_parser.osu_file移植
+    调用统一的 osu_file 解析器，与项目内其他功能一致
     
     参数:
         file_path: .osu文件路径
@@ -320,45 +351,40 @@ def parse_osu_file(file_path: Path) -> List:
         list of (time, type, end_time)
         type: 1=RC, 128=LN
     """
+    osu_obj = osu_file(file_path)
+    osu_obj.process()
+
+    if str(osu_obj.GameMode) != '3':
+        raise ValueError("该谱面不是 mania 模式")
+
     objects = []
-    
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # 找到[HitObjects]部分
-    hitobjects_start = content.find('[HitObjects]')
-    if hitobjects_start == -1:
-        return objects
-    
-    hitobjects_section = content[hitobjects_start:]
-    lines = hitobjects_section.split('\n')
-    
-    for line in lines[1:]:  # 跳过[HitObjects]行
-        line = line.strip()
-        if not line or line.startswith('['):
-            break
-        
-        parts = line.split(',')
-        if len(parts) < 5:
-            continue
-        
-        try:
-            x = int(parts[0])
-            time = int(parts[2])
-            obj_type = int(parts[3])
-            
-            if obj_type & 128:  # LN
-                end_time = int(parts[5].split(':')[0])
-            else:  # RC
-                end_time = time
-            
-            objects.append((time, obj_type, end_time))
-        except (ValueError, IndexError):
-            continue
-    
+    for start_time, obj_type, raw_end_time in zip(osu_obj.note_starts, osu_obj.note_types, osu_obj.note_ends):
+        start = int(start_time)
+        note_type = int(obj_type)
+
+        if note_type & 128:
+            end = int(raw_end_time)
+            if end < start:
+                end = start
+        else:
+            end = start
+
+        objects.append((start, note_type, end))
+
     return objects
 
-def calculate_note_counts(objects: List, num_songs: int = 4) -> List:
+def _get_note_weight(note_type: int, sv2_flag: bool) -> int:
+    """
+    计算单个物件权重
+    sv2_flag=False: RC/LN均计1
+    sv2_flag=True:  RC计1，LN计2
+    """
+    if sv2_flag and (note_type & 128):
+        return 2
+    return 1
+
+
+def calculate_note_counts(objects: List, num_songs: int = 4, sv2_flag: bool = False) -> List:
     """
     计算分段物量
     修改自： https://github.com/uzxn/osu-split/blob/main/osu-split.c
@@ -366,6 +392,7 @@ def calculate_note_counts(objects: List, num_songs: int = 4) -> List:
     参数:
         objects: 物件列表
         num_songs: 分段数量
+        sv2_flag: 是否使用sv2加权（LN按2计）
         
     返回:
         各段物量列表
@@ -400,6 +427,6 @@ def calculate_note_counts(objects: List, num_songs: int = 4) -> List:
             current_segment += 1
         
         if current_segment < num_songs:
-            segment_counts[current_segment] += 1
+            segment_counts[current_segment] += _get_note_weight(obj[1], sv2_flag)
     
     return segment_counts
