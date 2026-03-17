@@ -374,9 +374,12 @@ def plot_comprehensive(output_dir: str, osr_obj: osr_file, osu_obj: osu_file = N
     
     # 使用 parser 中提供的 corrector（parser 已对时间数据做了统一缩放）
     corrector = data.get("corrector", 1.0)
-    
-    # 匹配
-    delta_list, matched_pairs = match_notes_and_presses(osu_obj, osr_obj)
+
+    # 匹配 (仅在有 osu_obj 时进行)
+    if osu_obj is not None:
+        delta_list, matched_pairs = match_notes_and_presses(osu_obj, osr_obj)
+    else:
+        delta_list, matched_pairs = [], []
 
     # 构建按压分布图数据
     basetime = []
