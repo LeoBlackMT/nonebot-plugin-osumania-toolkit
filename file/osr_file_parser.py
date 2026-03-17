@@ -6,8 +6,6 @@ from collections import Counter
 from nonebot.log import logger
 from ..file.data import file_parser_data
 
-MOD_MAPPING = file_parser_data.MOD_MAPPING
-
 # ---------- 辅助函数 ----------
 def read_uleb128(data, offset):
     """从字节流中读取ULEB128编码的整数，返回(值, 新偏移)"""
@@ -569,7 +567,7 @@ class osr_file:
         
         mods = []
         # 检查每个模组位
-        for bit_value, mod_name in MOD_MAPPING.items():
+        for bit_value, mod_name in file_parser_data.MOD_MAPPING.items():
             if bit_value == 0:  # 跳过None
                 continue
             if mod_value & bit_value:

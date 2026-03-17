@@ -37,7 +37,7 @@ def get_rework_result_text(meta_data, mod_display: str, sr: float, speed_rate: f
     if LN_ratio:
         result.append(f"LN占比: {LN_ratio:.2%}")
         
-    if column_count == 4 or column_count == 7:
+    if column_count == 4 or column_count == 7 or column_count == 6:
         result.append(f"参考难度 ({column_count}K):  {est_diff(sr, LN_ratio, column_count)}")
         
     result.append(f"Rework结果 => {sr:.2f}")
@@ -154,22 +154,17 @@ async def process_zip_file(CACHE_DIR: Path, zip_file: Path, speed_rate: float, o
             shutil.rmtree(temp_path, ignore_errors=True)
 
 def est_diff(sr: float, LN_ratio: float, column_count: int) -> str:
-    LN_intervals_4K = sr_intervals_data.LN_intervals_4K
-    LN_intervals_7K = sr_intervals_data.LN_intervals_7K
-    RC_intervals_4K = sr_intervals_data.RC_intervals_4K
-    RC_intervals_7K = sr_intervals_data.RC_intervals_7K
-    
     if column_count == 4:
         RC_diff = None
-        for lower, upper, name in RC_intervals_4K:
+        for lower, upper, name in sr_intervals_data.RC_intervals_4K:
             if lower <= sr <= upper:
                 RC_diff = name
                 break
         if RC_diff is None:
             if sr < 1.502:
-                RC_diff = "< intro 1 low"
+                RC_diff = "< Intro 1 low"
             elif sr > 11.129:
-                RC_diff = "> theta high"
+                RC_diff = "> Theta high"
             else:
                 RC_diff = "未知RC难度"
 
@@ -177,7 +172,7 @@ def est_diff(sr: float, LN_ratio: float, column_count: int) -> str:
             return f"{RC_diff}"
         
         LN_diff = None
-        for lower, upper, name in LN_intervals_4K:
+        for lower, upper, name in sr_intervals_data.LN_intervals_4K:
             if lower <= sr <= upper:
                 LN_diff = name
                 break
@@ -193,18 +188,53 @@ def est_diff(sr: float, LN_ratio: float, column_count: int) -> str:
             return f"{LN_diff}"
         
         return f"{RC_diff} || {LN_diff}"
+
+    if column_count == 6:
+        RC_diff = None
+        for lower, upper, name in sr_intervals_data.RC_intervals_6K:
+            if lower <= sr <= upper:
+                RC_diff = name
+                break
+        if RC_diff is None:
+            if sr < 3.430:
+                RC_diff = "< Regular 0 low"
+            elif sr > 7.965:
+                RC_diff = "> Regular 9 high"
+            else:
+                RC_diff = "未知RC难度"
+
+        if LN_ratio < 0.1:
+            return f"{RC_diff}"
+
+        LN_diff = None
+        for lower, upper, name in sr_intervals_data.LN_intervals_6K:
+            if lower <= sr <= upper:
+                LN_diff = name
+                break
+        if LN_diff is None:
+            if sr < 3.530:
+                LN_diff = "< LN 0 low"
+            elif sr > 9.700:
+                LN_diff = "> LN Finish high"
+            else:
+                LN_diff = "未知LN难度"
+
+        if LN_ratio > 0.9:
+            return f"{LN_diff}"
+
+        return f"{RC_diff} || {LN_diff}"
     
     if column_count == 7:
         RC_diff = None
-        for lower, upper, name in RC_intervals_7K:
+        for lower, upper, name in sr_intervals_data.RC_intervals_7K:
             if lower <= sr <= upper:
                 RC_diff = name
                 break
         if RC_diff is None:
             if sr < 3.5085:
-                RC_diff = "< regular 0 low"
+                RC_diff = "< Regular 0 low"
             elif sr > 10.544:
-                RC_diff = "> regular stellium high"
+                RC_diff = "> Regular Stellium high"
             else:
                 RC_diff = "未知RC难度"
 
@@ -212,7 +242,7 @@ def est_diff(sr: float, LN_ratio: float, column_count: int) -> str:
             return f"{RC_diff}"
         
         LN_diff = None
-        for lower, upper, name in LN_intervals_7K:
+        for lower, upper, name in sr_intervals_data.LN_intervals_7K:
             if lower <= sr <= upper:
                 LN_diff = name
                 break
@@ -220,7 +250,7 @@ def est_diff(sr: float, LN_ratio: float, column_count: int) -> str:
             if sr < 4.836:
                 LN_diff = "< LN 3 low"
             elif sr > 10.666:
-                LN_diff = "> LN stellium high"
+                LN_diff = "> LN Stellium high"
             else:
                 LN_diff = "未知LN难度"
         
