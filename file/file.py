@@ -130,8 +130,11 @@ async def download_file(url: str, save_path: Path) -> bool:
         # 检查是否是 file:// URI
         elif url.startswith('file://'):
             is_local_path = True
-            # 移除 file:// 前缀并转换为路径
-            path_str = url[7:]  # 移除 'file://'
+            # 移除 file:// 前缀，解码 URL 编码，并转换为路径
+            path_str = unquote(url[7:])  # 移除 'file://' 并解码 %xx
+            # Windows: file:///C:/... -> /C:/... -> C:/...
+            if len(path_str) > 2 and path_str[0] == '/' and path_str[2] == ':':
+                path_str = path_str[1:]
             local_file_path = Path(path_str)
 
         if is_local_path and local_file_path:
