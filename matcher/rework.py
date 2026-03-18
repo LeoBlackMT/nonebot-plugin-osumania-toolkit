@@ -1,4 +1,5 @@
 import os
+import logging
 
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
@@ -54,7 +55,8 @@ async def handle_rework(bot: Bot, event: MessageEvent):
         tmp_file = CACHE_DIR / file_name
 
         if not await download_file(file_url, tmp_file):
-            await rework.finish(f"下载异常：{file_url}")
+            logging.warning("Failed to download file '%s' from URL '%s'", file_name, file_url)
+            await rework.finish(f"下载失败：无法获取文件 {file_name}，请检查文件是否存在且机器人有权限访问。")
 
         # 检查文件类型并处理
         try:
