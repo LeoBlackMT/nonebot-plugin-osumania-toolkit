@@ -65,7 +65,7 @@ def _to_local_path(path_or_uri: str) -> Path:
         # 处理类似 file:///C:/path 这种在 Windows 上会多出一个前导斜杠的情况
         if re.match(r"^/[A-Za-z]:", path):
             path = path[1:]
-        Path(path)
+        return Path(path)
     return Path(path_or_uri)
 
 
