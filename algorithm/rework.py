@@ -12,6 +12,14 @@ from ..algorithm.convert import convert_mc_to_osu
 from ..algorithm.utils import is_mc_file, parse_osu_filename
 from ..file.data import sr_intervals_data
 
+# 自定义异常，用于捕获特定错误类型，便于在调用处进行针对性处理
+class ParseError(Exception):
+    pass
+
+
+class NotManiaError(Exception):
+    pass
+
 def get_rework_result_text(meta_data, mod_display: str, sr: float, speed_rate: float, od_flag, LN_ratio: float, column_count: int):
     
     result = []
@@ -42,30 +50,35 @@ def get_rework_result_text(meta_data, mod_display: str, sr: float, speed_rate: f
         
     result.append(f"Rework结果 => {sr:.2f}")
 
-    return "谱面信息：\n" + "\n".join(result)
+    return " \n谱面信息：\n" + "\n".join(result)
 
 async def get_rework_result(file_path: str, speed_rate: float, od_flag, cvt_flag):
-    try:
-        loop = asyncio.get_running_loop()
-        # 将转换标记传入算法
-        result = await loop.run_in_executor(
-            None,
-            calculate,
-            str(file_path),
-            speed_rate,
-            od_flag,
-            cvt_flag
-        )
-        sr = result[0]
-        LN_ratio = result[1]
-        column_count = result[2]
-        if sr == -1:
-            raise Exception("ParseError")
-        elif sr == -2:
-            raise Exception("NotMania")
-        return sr, LN_ratio, column_count
-    except Exception as e:
-        raise Exception(f"{e}")
+    loop = asyncio.get_running_loop()
+    # 将转换标记传入算法
+    result = await loop.run_in_executor(
+        None,
+        calculate,
+        str(file_path),
+        speed_rate,
+        od_flag,
+        cvt_flag
+    )
+
+    if isinstance(result, (int, float)):
+        if result == -1:
+            raise ParseError()
+        if result == -2:
+            raise NotManiaError()
+        raise Exception(f"UnknownCalculateResult: {result}")
+
+    sr = result[0]
+    LN_ratio = result[1]
+    column_count = result[2]
+    if sr == -1:
+        raise ParseError()
+    if sr == -2:
+        raise NotManiaError()
+    return sr, LN_ratio, column_count
 
 def extract_zip_file(zip_path: Path, extract_dir: Path) -> list[Path]:
     """解压zip文件并返回所有.osu和.mc文件的路径列表"""
@@ -107,13 +120,12 @@ async def process_chart_file(chart_file: Path, speed_rate: float, od_flag, cvt_f
         
         return get_rework_result_text(meta_data, mod_display, sr, speed_rate, od_flag, LN_ratio, column_count)
         
+    except ParseError:
+        return f"{chart_file.name}: 谱面解析失败"
+    except NotManiaError:
+        return f"{chart_file.name}: 不是mania模式"
     except Exception as e:
-        if str(e) == "ParseError":
-            return f"{chart_file.name}: 谱面解析失败"
-        elif str(e) == "NotMania":
-            return f"{chart_file.name}: 不是mania模式"
-        else:
-            return f"{chart_file.name}: 计算失败 - {e}"
+        return f"{chart_file.name}: 计算失败 - {e}"
 
 async def process_zip_file(CACHE_DIR: Path, zip_file: Path, speed_rate: float, od_flag, cvt_flag, mod_display: str) -> list[str]:
     """处理压缩包文件并返回所有结果"""

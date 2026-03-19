@@ -104,9 +104,9 @@ def preprocess_file(file_path, speed_rate, od_flag, cvt_flag):
     column_count = p_obj.get_column_count()
     
     if p[7] == "Fail":
-        return None, 0, 0, [], [], [], [], None, "Fail"
+        return "Fail", 0, 0, 0, [], [], [], [], [], LN_ratio, column_count
     if p[7] == "NotMania":
-        return None, 0, 0, [], [], [], [], None, "NotMania"
+        return "NotMania", 0, 0, 0, [], [], [], [], [], LN_ratio, column_count
     
     match od_flag:
         case None:

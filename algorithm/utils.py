@@ -3,6 +3,7 @@ import json
 import os
 
 from nonebot.log import logger
+from pathlib import Path
 
 from ..file.osr_file_parser import osr_file
 from ..file.osu_file_parser import osu_file
@@ -400,3 +401,17 @@ def parse_osu_filename(file_path: str) -> dict | None:
         'Creator': mapper,
         'Version': difficulty
     }
+    
+def resolve_meta_data(chart_file: Path, file_name: str):
+    required_keys = {"Creator", "Artist", "Title", "Version"}
+
+    # 优先从 osu 文件内部元信息读取，失败或字段不完整时回退到文件名解析。
+    try:
+        osu_obj = osu_file(chart_file)
+        osu_obj.process()
+        if isinstance(osu_obj.meta_data, dict) and required_keys.issubset(osu_obj.meta_data.keys()):
+            return osu_obj.meta_data
+    except Exception:
+        pass
+
+    return parse_osu_filename(file_name)

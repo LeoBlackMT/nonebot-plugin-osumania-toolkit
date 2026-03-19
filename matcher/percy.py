@@ -26,6 +26,9 @@ async def handle_percy(bot: Bot, event: MessageEvent):
         if seg.type == "file":
             img_seg = seg
             break
+        if seg.type == "image":
+            img_seg = seg
+            break
 
     if not img_seg:
         await percy.finish("回复的消息中没有找到图片文件。")
@@ -67,7 +70,7 @@ async def handle_percy(bot: Bot, event: MessageEvent):
                 await percy.send("无法识别当前图片的投机取巧程度。")
                 return
         
-        process_ln_image(file_path, d, lzr_flag, output_path)
+        await process_ln_image(file_path, d, lzr_flag, output_path)
 
         # 先按普通图片发送，失败则降级为文件发送
         try:

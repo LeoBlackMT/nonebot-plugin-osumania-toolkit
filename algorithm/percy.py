@@ -1,3 +1,5 @@
+import asyncio
+
 from PIL import Image
 from typing import Tuple
 
@@ -121,7 +123,7 @@ def get_current_d(image_path):
 
     return a_true
 
-def process_ln_image(image_path, user_d, lzr=False, output_path=None):
+def _process_ln_image_sync(image_path, user_d, lzr=False, output_path=None):
     """处理ln图片
 
     Args:
@@ -266,3 +268,14 @@ def process_ln_image(image_path, user_d, lzr=False, output_path=None):
     if output_path:
         new_img.save(str(output_path))
     return new_img
+
+
+async def process_ln_image(image_path, user_d, lzr=False, output_path=None):
+    """异步处理ln图片，避免阻塞事件循环。"""
+    return await asyncio.to_thread(
+        _process_ln_image_sync,
+        image_path,
+        user_d,
+        lzr,
+        output_path,
+    )

@@ -7,10 +7,9 @@ from nonebot.exception import FinishedException
 from pathlib import Path
 
 from ..file.file import download_file, download_file_by_id, get_file_url
-from ..file.osu_file_parser import osu_file
 from ..algorithm.utils import send_forward_text_messages
-from ..algorithm.rework import get_rework_result_text, get_rework_result, process_zip_file
-from ..algorithm.utils import parse_cmd, is_mc_file, parse_osu_filename
+from ..algorithm.rework import get_rework_result_text, get_rework_result, process_zip_file, ParseError, NotManiaError
+from ..algorithm.utils import parse_cmd, is_mc_file, resolve_meta_data
 from ..algorithm.convert import convert_mc_to_osu
 
 from nonebot_plugin_localstore import get_plugin_cache_dir
@@ -98,20 +97,14 @@ async def handle_rework(bot: Bot, event: MessageEvent):
 
                 # 计算星数
                 sr, LN_ratio, column_count = await get_rework_result(str(chart_file), speed_rate, od_flag, cvt_flag)
-                meta_data = parse_osu_filename(file_name)
-                if not meta_data:
-                    osu_obj = osu_file(chart_file)
-                    osu_obj.process()
-                    meta_data = osu_obj.meta_data
-                await rework.send(get_rework_result_text(meta_data, mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), at_sender=True)
+                await rework.send(get_rework_result_text(resolve_meta_data(chart_file, file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), at_sender=True)
                 
+        except ParseError:
+            await rework.send("谱面解析失败，可能是文件损坏或格式不兼容。")
+        except NotManiaError:
+            await rework.send("该谱面不是 mania 模式，无法计算。")
         except Exception as e:
-            if str(e) == "ParseError":
-                await rework.send("谱面解析失败，可能是文件损坏或格式不兼容。")
-            elif str(e) == "NotMania":
-                await rework.send("该谱面不是 mania 模式，无法计算。")
-            else:
-                await rework.send(f"计算失败：{e}")
+            await rework.send(f"计算失败：{e}")
         finally:
             # 清理临时文件
             if tmp_file and tmp_file.exists():
@@ -128,9 +121,13 @@ async def handle_rework(bot: Bot, event: MessageEvent):
                 await rework.finish(f"未找到谱面: b{bid}")
                 
             sr, LN_ratio, column_count = await get_rework_result(str(tmp_file), speed_rate, od_flag, cvt_flag)
-            await rework.send(get_rework_result_text(parse_osu_filename(file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), at_sender=True)
+            await rework.send(get_rework_result_text(resolve_meta_data(tmp_file, file_name), mod_display, sr, speed_rate, od_flag, LN_ratio, column_count), at_sender=True)
         except FinishedException:
             pass
+        except ParseError:
+            await rework.send("错误: 谱面解析失败，可能是文件损坏或格式不兼容")
+        except NotManiaError:
+            await rework.send("错误: 该谱面不是 mania 模式，无法计算")
         except Exception as e:
             if "max() iterable argument is empty" in str(e):
                 await rework.send(f"错误: 未找到谱面 b{bid}，请检查bid是否正确")
