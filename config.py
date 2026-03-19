@@ -6,6 +6,10 @@ class Config(BaseModel):
 
     # 缓存文件最大保留时间（小时），默认 24 小时
     omtk_cache_max_age: int = 24
+
+    # 允许自动清理的临时文件目录列表，仅这些目录下的源文件会在复制后被删除
+    # 例如: omtk_temp_cleanup_dirs=["C:\\Users\\Demo\\Downloads"]
+    omtk_temp_cleanup_dirs: list[str] = []
     
     # 作弊分析阈值
     bin_max_time: int = 500 # 直方图最大时间(ms)

@@ -4,11 +4,30 @@ import aiohttp
 import shutil
 import time
 
+from nonebot import get_plugin_config
 from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, MessageSegment
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from typing import Optional, Tuple
+
+from ..config import Config
+
+
+def _is_in_cleanup_dirs(path: Path) -> bool:
+    """检查路径是否在允许清理的目录列表中"""
+    try:
+        cfg = get_plugin_config(Config)
+        cleanup_dirs = cfg.omtk_temp_cleanup_dirs
+    except Exception:
+        return False
+    for d in cleanup_dirs:
+        try:
+            if path.is_relative_to(Path(d)):
+                return True
+        except Exception:
+            continue
+    return False
 
 _WINDOWS_RESERVED = re.compile(
     r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)', re.IGNORECASE
@@ -93,14 +112,6 @@ async def get_file_url(bot: Bot, file_seg: MessageSegment) -> Optional[Tuple[str
         # 获取文件 URL
         file_url = file_data.get("url", "")
 
-        # 如果 url 字段是 HTTP URL，检查 file 字段是否同时存有本地路径，有则调度清理
-        if file_url and file_url.startswith("http"):
-            file_field_raw = file_data.get("file", "")
-            if file_field_raw and not file_field_raw.startswith("http"):
-                local_path = _get_local_path_from_str(file_field_raw)
-                if local_path is not None:
-                    asyncio.create_task(cleanup_temp_file(local_path))
-
         # 如果没有直接的 URL，尝试其他方法
         if not file_url:
             # 方法1: 检查 file 字段是否已经是 URL
@@ -118,9 +129,6 @@ async def get_file_url(bot: Bot, file_seg: MessageSegment) -> Optional[Tuple[str
                     local_file_str = file_info.get("file", "")
                     if http_url:
                         file_url = http_url
-                        local_path = _get_local_path_from_str(local_file_str)
-                        if local_path is not None:
-                            asyncio.create_task(cleanup_temp_file(local_path))
                     elif local_file_str:
                         file_url = local_file_str
                     if file_url:
@@ -187,7 +195,8 @@ async def download_file(url: str, save_path: Path) -> bool:
 
             logger.info(f"从本地路径复制文件：{local_file_path} -> {save_path}")
             shutil.copy2(local_file_path, save_path)
-            asyncio.create_task(cleanup_temp_file(local_file_path, delay=30.0))
+            if _is_in_cleanup_dirs(local_file_path):
+                asyncio.create_task(cleanup_temp_file(local_file_path, delay=30.0))
             return True
         else:
             # HTTP/HTTPS 下载
