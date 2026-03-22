@@ -90,7 +90,7 @@ def preprocess_file(file_path, speed_rate, od_flag, cvt_flag):
     if cvt_flag:
         if "IN" in cvt_flag:
             try:
-                p_obj.mod_IN(cvt_flag[1])
+                p_obj.mod_IN()
                 LN_ratio = p_obj.get_LN_ratio()
             except Exception:
                 pass
@@ -100,6 +100,12 @@ def preprocess_file(file_path, speed_rate, od_flag, cvt_flag):
                 LN_ratio = p_obj.get_LN_ratio()
             except Exception:
                 pass
+
+    # IN/HO 改写了物件结构，后续计算必须读取更新后的快照
+    p_obj.note_times = p_obj.get_note_times()
+    p_obj.object_intervals = p_obj.get_object_intervals()
+    p = p_obj.get_parsed_data()
+    LN_ratio = p_obj.get_LN_ratio()
 
     column_count = p_obj.get_column_count()
     

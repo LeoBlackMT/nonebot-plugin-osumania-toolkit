@@ -281,27 +281,6 @@ def parse_cmd(cmd_text: str):
             i += 1
             continue
 
-        # 获取反键参数（可选）
-        if part.lower().startswith("gap:"):
-            if "HO" in cvt_flag:
-                err_msg.append(f"模组冲突: IN/HO; ")
-                i += 1
-                continue
-            if "IN" not in cvt_flag:
-                err_msg.append(f"面缝参数仅在反键模组中有效，请在模组参数之后输入; ")
-                i += 1
-                continue
-            try:
-                gap_value = int(part[4:])
-                if 10 <= gap_value <= 1000:
-                    cvt_flag.append(gap_value)
-                else:
-                    err_msg.append(f"面缝参数必须在10到1000之间: gap:{part[4:]}; ")
-            except ValueError:
-                err_msg.append(f"无效的面缝参数: {part[4:]}; ")
-            i += 1
-            continue
-        
         i += 1
 
     return speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg

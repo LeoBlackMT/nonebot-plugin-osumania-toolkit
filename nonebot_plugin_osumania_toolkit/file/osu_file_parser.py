@@ -1,4 +1,5 @@
 import numpy as np
+import bisect
 
 from nonebot.log import logger
 
@@ -25,6 +26,7 @@ class osu_file:
         self.meta_data = {}
         self.breaks = []
         self.object_intervals = []
+        self.timing_points = []  # list[tuple[int, float]] -> (time_ms, beat_length_ms)
 
     def get_parsed_data(self):
         return [self.column_count,
@@ -48,6 +50,7 @@ class osu_file:
         i = 0
         in_metadata_section = False
         in_events_section = False
+        in_timing_section = False
         while i < len(lines):
             line = lines[i].strip()
             if not line:
@@ -63,9 +66,14 @@ class osu_file:
                 in_events_section = True
                 i += 1
                 continue
+            if line == "[TimingPoints]":
+                in_timing_section = True
+                i += 1
+                continue
             elif line.startswith("[") and line.endswith("]"):
                 in_metadata_section = False
                 in_events_section = False
+                in_timing_section = False
 
             if in_metadata_section:
                 if ":" in line:
@@ -74,6 +82,9 @@ class osu_file:
 
             if in_events_section:
                 self.parse_event_line(line)
+
+            if in_timing_section:
+                self.parse_timing_point_line(line)
 
             if "OverallDifficulty:" in line:
                 try:
@@ -112,6 +123,9 @@ class osu_file:
         self.LN_ratio = self.get_LN_ratio()
         self.note_times = self.get_note_times()
         self.object_intervals = self.get_object_intervals()
+        if not self.timing_points:
+            self.timing_points = [(0, 500.0)]
+        self.timing_points.sort(key=lambda x: x[0])
         if self.status not in {"Fail", "NotMania"}:
             self.status = "OK"
         logger.debug(f"谱面物件总数: {len(self.note_starts)}")
@@ -167,6 +181,30 @@ class osu_file:
             self.note_ends.append(note_end)
         except Exception as e:
             self.status = "Fail"
+
+    def parse_timing_point_line(self, timing_line):
+        if not timing_line or timing_line.startswith("//"):
+            return
+        parts = [p.strip() for p in timing_line.split(",")]
+        if len(parts) < 2:
+            return
+        try:
+            t = int(float(parts[0]))
+            beat_length = float(parts[1])
+            uninherited = int(parts[6]) if len(parts) > 6 and parts[6] else 1
+            if uninherited == 1 and beat_length > 0:
+                self.timing_points.append((t, beat_length))
+        except Exception:
+            return
+
+    def get_beat_length_at(self, time_ms: float) -> float:
+        if not self.timing_points:
+            return 500.0
+        times = [tp[0] for tp in self.timing_points]
+        idx = bisect.bisect_right(times, int(time_ms)) - 1
+        if idx < 0:
+            return self.timing_points[0][1]
+        return self.timing_points[idx][1]
     
     def get_LN_ratio(self):
         # 计算 LN 比例
@@ -202,81 +240,49 @@ class osu_file:
         intervals.sort(key=lambda item: (-item[1], item[0]))
         return intervals
     
-    def mod_IN(self, gap: float = 150, ln_as_hit_thres: float = 100):
-        # 反键处理 (Full LN)
-        # 将解析出的列/时间列表按照 reamber.algorithms.generate.full_ln 中的算法进行转换。
-        # gap: 相邻按键之间的间隔时间阈值；
-        # ln_as_hit_thres: 如果计算出的 ln 长度小于该阈值，则将该按键当作普通 note 处理。
-        #
-        # 算法流程：
-        #   1. 按列将笔记分组并按时间排序。
-        #   2. 对于每一列的每个笔记，计算与下一条笔记的时间差 diff。
-        #   3. 如果 diff 为 NaN(即本列最后一条)，则保持原有类型；
-        #      否则计算 inv_length = diff - gap，若 inv_length >= ln_as_hit_thres，
-        #      生成一个长度为 inv_length 的 LN，否则将其转为 hit。
-        #   4. 用计算出的列/时间/类型列表替换原有数据。
-
-        # 先按列分组原始数据
+    def mod_IN(self):
+        # 官方 ManiaModInvert 等价逻辑：
+        # 1) 对每列收集事件点（普通键头、LN头、LN尾）并排序。
+        # 2) 对每对相邻事件生成一条 LN。
+        # 3) LN 时长 = max(delta/2, delta - beatLength/4)，beatLength 取后一事件时刻。
         notes_by_col = {}
-        for col, start, end, ntype in zip(
-            self.columns, self.note_starts, self.note_ends, self.note_types
-        ):
-            # 长按键的长度为 end-start，普通按键记为 NaN
-            length = float(np.nan) if (ntype & 128) == 0 else end - start
-            notes_by_col.setdefault(col, []).append((start, length))
+        for col, start, end, ntype in zip(self.columns, self.note_starts, self.note_ends, self.note_types):
+            notes_by_col.setdefault(col, []).append((start, end, ntype))
 
-        new_cols = []
-        new_starts = []
-        new_ends = []
-        new_types = []
-
-        # 对每一列分别处理
+        new_objects = []
         for col, notes in notes_by_col.items():
-            notes.sort(key=lambda x: x[0])  # 按 offset 排序
-            offsets = [n[0] for n in notes]
-            lengths = [n[1] for n in notes]
-
-            for idx, offset in enumerate(offsets):
-                length = lengths[idx]
-                # 计算与下一条笔记的时间差
-                if idx + 1 < len(offsets):
-                    diff = offsets[idx + 1] - offset
+            locations = []
+            for start, end, ntype in notes:
+                if (ntype & 128) != 0:
+                    locations.append(float(start))
+                    locations.append(float(end))
                 else:
-                    diff = np.nan
+                    locations.append(float(start))
 
-                if np.isnan(diff):
-                    # 列末尾，保持原类型
-                    if np.isnan(length):
-                        new_cols.append(col)
-                        new_starts.append(offset)
-                        new_types.append(1)
-                        new_ends.append(offset)
-                    else:
-                        new_cols.append(col)
-                        new_starts.append(offset)
-                        new_types.append(128)
-                        new_ends.append(offset + length)
-                    continue
+            locations.sort()
+            for i in range(len(locations) - 1):
+                start_time = locations[i]
+                next_time = locations[i + 1]
+                duration = next_time - start_time
+                beat_length = self.get_beat_length_at(next_time)
+                duration = max(duration / 2.0, duration - beat_length / 4.0)
+                end_time = start_time + duration
+                end_time_int = int(round(end_time))
+                start_time_int = int(round(start_time))
+                if end_time_int <= start_time_int:
+                    end_time_int = start_time_int + 1
+                new_objects.append((start_time_int, col, end_time_int))
 
-                inv_len = diff - gap
-                if inv_len >= ln_as_hit_thres:
-                    # 产生一个长度为 inv_len 的 LN
-                    new_cols.append(col)
-                    new_starts.append(offset)
-                    new_types.append(128)
-                    new_ends.append(offset + inv_len)
-                else:
-                    # 当作 hit 处理
-                    new_cols.append(col)
-                    new_starts.append(offset)
-                    new_types.append(1)
-                    new_ends.append(offset)
+        new_objects.sort(key=lambda x: (x[0], x[1]))
 
-        # 将 parser 的字段替换成新生成的数据
-        self.columns = new_cols
-        self.note_starts = new_starts
-        self.note_types = new_types
-        self.note_ends = new_ends
+        self.columns = [obj[1] for obj in new_objects]
+        self.note_starts = [obj[0] for obj in new_objects]
+        self.note_types = [128 for _ in new_objects]
+        self.note_ends = [obj[2] for obj in new_objects]
+        self.breaks = []
+        self.LN_ratio = self.get_LN_ratio()
+        self.note_times = self.get_note_times()
+        self.object_intervals = self.get_object_intervals()
 
     def mod_HO(self):
         # 转米处理 (No LN)
@@ -285,3 +291,6 @@ class osu_file:
             if (self.note_types[i] & 128) != 0:
                 self.note_types[i] = 1
                 self.note_ends[i] = 0
+        self.LN_ratio = self.get_LN_ratio()
+        self.note_times = self.get_note_times()
+        self.object_intervals = self.get_object_intervals()
