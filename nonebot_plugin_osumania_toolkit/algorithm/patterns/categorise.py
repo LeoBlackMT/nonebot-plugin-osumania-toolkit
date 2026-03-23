@@ -7,8 +7,12 @@ from __future__ import annotations
 
 from typing import List
 
-from .config import CATEGORY_JS_HS_SECONDARY_RATIO, IMPORTANT_CLUSTER_RATIO, SV_AMOUNT_THRESHOLD
+from nonebot import get_plugin_config
+
+from ...config import Config
 from .clustering import Cluster
+
+config = get_plugin_config(Config)
 
 
 def is_hybrid_chart(primary: Cluster, secondary: Cluster | None) -> bool:
@@ -21,13 +25,13 @@ def is_hybrid_chart(primary: Cluster, secondary: Cluster | None) -> bool:
 
 def categorise_chart(keys: int, ordered_clusters: List[Cluster], sv_amount: float) -> str:
     if len(ordered_clusters) == 0:
-        return "SV" if sv_amount >= SV_AMOUNT_THRESHOLD else "Uncategorised"
+        return "SV" if sv_amount >= config.SV_AMOUNT_THRESHOLD else "Uncategorised"
 
     # important_clusters：Importance / first > 0.5
     first_imp = ordered_clusters[0].Importance
     important = []
     for c in ordered_clusters:
-        if c.Importance / first_imp > IMPORTANT_CLUSTER_RATIO:
+        if c.Importance / first_imp > config.IMPORTANT_CLUSTER_RATIO:
             important.append(c)
         else:
             break
@@ -38,14 +42,14 @@ def categorise_chart(keys: int, ordered_clusters: List[Cluster], sv_amount: floa
     is_hybrid = is_hybrid_chart(cluster_1, cluster_2)
 
     is_tech = cluster_1.Mixed
-    is_sv = sv_amount >= SV_AMOUNT_THRESHOLD
+    is_sv = sv_amount >= config.SV_AMOUNT_THRESHOLD
 
     if len(cluster_1.SpecificTypes) > 0 and cluster_1.SpecificTypes[0][1] > 0:
         name = cluster_1.SpecificTypes[0][0]
     elif len(cluster_1.SpecificTypes) >= 2 and cluster_1.SpecificTypes[0][0] == "Jumpstream" and cluster_1.SpecificTypes[1][0] == "Handstream":
         a1 = cluster_1.SpecificTypes[0][1]
         a2 = cluster_1.SpecificTypes[1][1]
-        name = "Jumpstream/Handstream" if (a2 / a1) > CATEGORY_JS_HS_SECONDARY_RATIO else cluster_1.Pattern.value
+        name = "Jumpstream/Handstream" if (a2 / a1) > config.CATEGORY_JS_HS_SECONDARY_RATIO else cluster_1.Pattern.value
     else:
         name = cluster_1.Pattern.value
 

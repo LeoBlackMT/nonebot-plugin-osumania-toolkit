@@ -8,9 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .config import BPM_CLUSTER_THRESHOLD, CLUSTER_SPECIFIC_NAME_MIN_RATIO
+from nonebot import get_plugin_config
+
+from ...config import Config
 from .find_patterns import FoundPattern
 from .patterns_def import CorePattern, resolve_rating_multiplier
+
+config = get_plugin_config(Config)
 
 
 @dataclass
@@ -27,7 +31,7 @@ class Cluster:
         return self.Amount * self.RatingMultiplier * float(self.BPM)
 
     def Format(self, rate: float) -> str:
-        if len(self.SpecificTypes) > 0 and self.SpecificTypes[0][1] >= CLUSTER_SPECIFIC_NAME_MIN_RATIO:
+        if len(self.SpecificTypes) > 0 and self.SpecificTypes[0][1] >= config.CLUSTER_SPECIFIC_NAME_MIN_RATIO:
             name = self.SpecificTypes[0][0]
         else:
             name = self.Pattern.value
@@ -83,7 +87,7 @@ def assign_clusters(patterns: List[FoundPattern]) -> List[Tuple[FoundPattern, _C
 
     def add_to_cluster(ms_per_beat: float) -> _ClusterBuilder:
         for c in bpms_non_mixed:
-            if abs(c.OriginalMsPerBeat - ms_per_beat) < BPM_CLUSTER_THRESHOLD:
+            if abs(c.OriginalMsPerBeat - ms_per_beat) < config.BPM_CLUSTER_THRESHOLD:
                 c.Add(ms_per_beat)
                 return c
         newc = _ClusterBuilder(SumMs=ms_per_beat, OriginalMsPerBeat=ms_per_beat, Count=1, BPM=None)

@@ -8,7 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-from .config import ENABLE_MULTI_LABEL_SAME_WINDOW, PATTERN_STABILITY_THRESHOLD
+from nonebot import get_plugin_config
+
+from ...config import Config
 from .chart import Chart
 from .primitives import RowInfo, calculate_primitives
 from .patterns_def import (
@@ -25,6 +27,8 @@ from .patterns_def import (
     SPECIFIC_OTHER,
 )
 
+
+config = get_plugin_config(Config)
 
 @dataclass
 class FoundPattern:
@@ -69,7 +73,7 @@ def _append_found_pattern(
 ) -> None:
     d = remaining[:n2]
     mean_mspb = sum(x.MsPerBeat for x in d) / len(d)
-    mixed = not all(abs(x.MsPerBeat - mean_mspb) < PATTERN_STABILITY_THRESHOLD for x in d)
+    mixed = not all(abs(x.MsPerBeat - mean_mspb) < config.PATTERN_STABILITY_THRESHOLD for x in d)
 
     start = remaining[0].Time
     if pattern == CorePattern.Jacks:
@@ -89,7 +93,6 @@ def _append_found_pattern(
         )
     )
 
-
 def _append_core_matches(
     results: List[FoundPattern],
     pattern: CorePattern,
@@ -101,7 +104,7 @@ def _append_core_matches(
     if core_n == 0:
         return
 
-    if ENABLE_MULTI_LABEL_SAME_WINDOW:
+    if config.ENABLE_MULTI_LABEL_SAME_WINDOW:
         matched = _pick_specific_all(specific_list, remaining)
         if len(matched) == 0:
             _append_found_pattern(results, pattern, None, core_n, remaining, last_note)

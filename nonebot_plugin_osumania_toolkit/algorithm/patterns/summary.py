@@ -8,12 +8,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from .config import IMPORTANT_CLUSTER_RATIO
+from nonebot import get_plugin_config
+
+from ...config import Config
 from .find_patterns import find
 from .clustering import Cluster, calculate_clustered_patterns
 from .patterns_def import CorePattern
 from .primitives import ln_percent, sv_time
 from .categorise import categorise_chart
+
+config = get_plugin_config(Config)
 
 
 @dataclass
@@ -32,7 +36,7 @@ class PatternReport:
         importance = self.Clusters[0].Importance
         out = []
         for c in self.Clusters:
-            if c.Importance / importance > IMPORTANT_CLUSTER_RATIO:
+            if c.Importance / importance > config.IMPORTANT_CLUSTER_RATIO:
                 out.append(c)
             else:
                 break
