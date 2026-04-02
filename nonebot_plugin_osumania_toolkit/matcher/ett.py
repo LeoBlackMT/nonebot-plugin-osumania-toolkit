@@ -16,7 +16,7 @@ from ..algorithm.ett import (
     render_ett_card,
 )
 from ..algorithm.utils import parse_cmd, send_forward_text_messages
-from ..file.file import download_file, download_file_by_id, get_file_url
+from ..file.file import download_file, download_file_by_id, get_file_url, safe_filename
 
 
 CACHE_DIR = get_plugin_cache_dir()
@@ -57,7 +57,7 @@ async def handle_ett(bot: Bot, event: MessageEvent):
                 await ett.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
 
             file_name, file_url = file_info
-            file_name = os.path.basename(file_name)
+            file_name = safe_filename(os.path.basename(file_name))
             if not file_name.lower().endswith((".osu", ".mc", ".osz", ".mcz")):
                 await ett.finish("请回复 .osu/.mc/.osz/.mcz 格式的谱面文件。")
 

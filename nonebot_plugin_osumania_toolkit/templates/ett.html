@@ -52,9 +52,9 @@
             grid-template-rows: auto auto minmax(0, 1fr) auto;
             gap: 8px;
             width: 475px;
-            height: 520px;
-            min-height: 520px;
-            max-height: 520px;
+            height: {{ card_height | default(520) }}px;
+            min-height: {{ card_height | default(520) }}px;
+            max-height: {{ card_height | default(520) }}px;
         }
 
         .status-row {

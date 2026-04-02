@@ -7,6 +7,7 @@ import time
 from nonebot.log import logger
 from nonebot import get_plugin_config
 from nonebot.adapters.onebot.v11 import Bot, MessageSegment
+from nonebot_plugin_localstore import get_plugin_cache_dir
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from typing import Optional, Tuple
@@ -21,10 +22,41 @@ _WINDOWS_RESERVED = re.compile(
 )
 
 def safe_filename(filename: str) -> str:
-    name = re.sub(r'[\\/*?:"<>|]', '_', filename)
+    name = (filename or "").strip().replace("\x00", "")
+    name = re.sub(r'[\\/*?:"<>|]', '_', name)
+    if name in {"", ".", ".."}:
+        name = "uploaded_file"
     if _WINDOWS_RESERVED.match(name):
         name = '_' + name
     return name
+
+
+def _get_cache_root() -> Optional[Path]:
+    try:
+        return get_plugin_cache_dir().resolve(strict=False)
+    except Exception:
+        return None
+
+
+def _is_safe_cleanup_target(path: Path) -> bool:
+    cache_root = _get_cache_root()
+    if cache_root is None:
+        return False
+
+    try:
+        target = path.resolve(strict=False)
+    except Exception:
+        return False
+
+    # Never allow deleting the cache root itself via cleanup_paths.
+    if target == cache_root:
+        return False
+
+    try:
+        target.relative_to(cache_root)
+        return True
+    except Exception:
+        return False
 
 
 def _get_local_path_from_str(path_str: str) -> Optional[Path]:
@@ -104,7 +136,7 @@ async def get_file_url(bot: Bot, file_seg: MessageSegment) -> Optional[Tuple[str
             file_field_raw = file_data.get("file", "")
             if file_field_raw and not file_field_raw.startswith("http"):
                 local_path = _get_local_path_from_str(file_field_raw)
-                if local_path is not None:
+                if local_path is not None and _is_safe_cleanup_target(local_path):
                     asyncio.create_task(cleanup_temp_file(local_path))
 
         # 如果没有直接的 URL，尝试其他方法
@@ -125,7 +157,7 @@ async def get_file_url(bot: Bot, file_seg: MessageSegment) -> Optional[Tuple[str
                     if http_url:
                         file_url = http_url
                         local_path = _get_local_path_from_str(local_file_str)
-                        if local_path is not None:
+                        if local_path is not None and _is_safe_cleanup_target(local_path):
                             asyncio.create_task(cleanup_temp_file(local_path))
                     elif local_file_str:
                         file_url = local_file_str
@@ -200,7 +232,8 @@ async def download_file(url: str, save_path: Path) -> bool:
 
             logger.info(f"从本地路径复制文件：{local_file_path} -> {save_path}")
             shutil.copy2(local_file_path, save_path)
-            asyncio.create_task(cleanup_temp_file(local_file_path, delay=30.0))
+            if _is_safe_cleanup_target(local_file_path):
+                asyncio.create_task(cleanup_temp_file(local_file_path, delay=30.0))
             return True
         else:
             # HTTP/HTTPS 下载
@@ -315,6 +348,10 @@ async def cleanup_paths(*paths, delay: float = 10.0):
         if not file_path.exists():
             continue
 
+        if not _is_safe_cleanup_target(file_path):
+            logger.warning(f"拒绝清理非缓存路径：{file_path}")
+            continue
+
         try:
             if file_path.is_dir():
                 shutil.rmtree(file_path)
@@ -335,6 +372,23 @@ def cleanup_old_cache(cache_dir: Path, max_age_hours: int = 24):
         max_age_hours: 最大保留时间（小时），默认 24 小时
     """
     try:
+        cache_root = _get_cache_root()
+        try:
+            resolved_cache_dir = cache_dir.resolve(strict=False)
+        except Exception:
+            logger.warning(f"缓存目录路径无效，跳过清理: {cache_dir}")
+            return
+
+        if resolved_cache_dir.parent == resolved_cache_dir:
+            logger.warning(f"拒绝清理根目录样式路径: {resolved_cache_dir}")
+            return
+
+        if cache_root is not None and resolved_cache_dir != cache_root:
+            logger.warning(
+                f"缓存目录与插件缓存根不一致，跳过清理: {resolved_cache_dir} (expected: {cache_root})"
+            )
+            return
+
         if not cache_dir.exists():
             logger.info(f"缓存目录不存在，跳过清理: {cache_dir}")
             return

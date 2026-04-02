@@ -29,7 +29,7 @@ DEFAULT_SCORE_GOAL = 0.93
 MAX_SKILL_VALUE = 41.0
 OVERALL_MAX = 41.0
 OVERALL_TO_STAR_MAX = 10.0
-SKILLSET_ORDER = [
+FULL_SKILLSET_ORDER = [
     "Stream",
     "Jumpstream",
     "Handstream",
@@ -53,12 +53,15 @@ class ETTUnsupportedKeyError(Exception):
 
 
 async def render_ett_card(template_dir: Path, data: dict) -> bytes:
+    card_height = int(data.get("card_height", 520))
+    card_height = max(460, min(card_height, 560))
+
     image_bytes = await template_to_pic(
         template_path=template_dir,
         template_name="ett.html",
         templates=data,
         max_width=475,
-        device_height=520,
+        device_height=card_height,
         allow_refit=False,
     )
     return image_bytes
@@ -84,9 +87,16 @@ def _format_rate(rate: float) -> str:
     return f"{rate:.2f}".rstrip("0").rstrip(".")
 
 
-def _build_skill_rows(values: dict[str, float]) -> list[dict[str, str]]:
+def _skillset_order_for_keycount(keycount: int) -> list[str]:
+    if keycount in (6, 7):
+        return [s for s in FULL_SKILLSET_ORDER if s != "Technical"]
+    return FULL_SKILLSET_ORDER
+
+
+def _build_skill_rows(values: dict[str, float], keycount: int) -> list[dict[str, str]]:
+    skillset_order = _skillset_order_for_keycount(keycount)
     rows: list[dict[str, str]] = []
-    for name in SKILLSET_ORDER:
+    for name in skillset_order:
         value = float(values.get(name, 0.0))
         clamped = max(0.0, min(value, MAX_SKILL_VALUE))
         width = (clamped / MAX_SKILL_VALUE) * 100.0
@@ -184,6 +194,8 @@ async def analyze_ett_chart(
     overall_text_pref = _color_for(star_value, STAR_TEXT_STOPS, "#f6fbff")
     overall_text = _pick_readable_text_color(star_value, overall_bg, overall_text_pref)
 
+    card_height = 500 if keycount in (6, 7) else 520
+
     return {
         "file_name": target_name,
         "template": {
@@ -194,7 +206,8 @@ async def analyze_ett_chart(
             "overall_bg_color": overall_bg,
             "overall_text_color": overall_text,
             "ett_meta_lines": meta_lines,
-            "skillsets": _build_skill_rows(values),
+            "skillsets": _build_skill_rows(values, keycount),
+            "card_height": card_height,
         },
     }
 

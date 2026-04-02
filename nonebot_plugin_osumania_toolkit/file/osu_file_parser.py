@@ -161,8 +161,13 @@ class osu_file:
 
         try:
             x = string_to_int(params[0])
-            column_width = int(512 / self.column_count) if self.column_count > 0 else 1
-            column = int(x / column_width)
+            if self.column_count > 0:
+                # Use proportional mapping with clamping to avoid out-of-range lanes
+                # (e.g., 7K right edge x=511 should still map to lane 6).
+                column = int((x * self.column_count) / 512)
+                column = max(0, min(column, self.column_count - 1))
+            else:
+                column = 0
             self.columns.append(column)
 
             note_start = int(params[2])

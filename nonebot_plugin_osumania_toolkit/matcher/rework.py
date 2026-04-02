@@ -9,7 +9,7 @@ from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.exception import FinishedException
 from pathlib import Path
 
-from ..file.file import download_file, download_file_by_id, get_file_url
+from ..file.file import download_file, download_file_by_id, get_file_url, safe_filename
 from ..algorithm.utils import send_forward_text_messages
 from ..algorithm.rework import get_rework_result_text, get_rework_result, process_zip_file, ParseError, NotManiaError
 from ..algorithm.utils import parse_cmd, is_mc_file, resolve_meta_data
@@ -53,7 +53,7 @@ async def handle_rework(bot: Bot, event: MessageEvent):
             await rework.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
 
         file_name, file_url = file_info
-        file_name = os.path.basename(file_name)
+        file_name = safe_filename(os.path.basename(file_name))
         if not (file_name.lower().endswith(".osu") or file_name.lower().endswith(".mc") or
                 file_name.lower().endswith(".osz") or file_name.lower().endswith(".mcz")):
             await rework.finish("请回复 .osu/.mc 格式的谱面文件。")
