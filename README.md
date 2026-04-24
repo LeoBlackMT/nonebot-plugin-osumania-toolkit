@@ -61,7 +61,7 @@ _✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
 
 打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
 
-    plugins = ["nonebot_plugin_template"]
+    plugins = ["nonebot_plugin_osumania_toolkit"]
 
 </details>
 
@@ -70,9 +70,9 @@ _✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
 1. 对 bot 发送 `/omtk` 获取帮助信息
 2. 如果插件运行在 Unix 系统上，需要对 `algorithm/ett/official_minaclac_runner` 授予执行权限（`chmod +x official_minaclac_runner`），以确保`/ett`功能正常使用。
 3. 如果需要为`/cvtscore`添加其他规则集，请参考[规则集示例](docs/ruleset-description.jsonc)和[规则集模板示例](docs/ruleset-template-description.jsonc)。
-4. 如果未来Etterna官方算法有更新，或你想使用自定义的算法版本，可以参考[构建指南](docs/builder_usage.md)自行构建并替换`algorithm/ett/official_minacalc_runner`。
+4. 如果未来Etterna官方算法有更新而本插件尚未更新，或你想使用自定义的算法版本时，可以参考[构建指南](docs/builder_usage.md)自行构建并替换`algorithm/ett/official_minacalc_runner`。
 5. 关于估计算法的准确度和表现，你可以前往[ManiaMapAnalyser Benchmark](https://leoblackmt.github.io/osumania_map_analyser/?algorithm=Mixed&scope=ALL)查看基于真实谱面数据的评测结果。
-6. 如果你有任何问题或建议，欢迎提交issue或pr！
+6. 如果你有任何问题或建议，欢迎提交issue或pr。
 
 
 ## 配置说明

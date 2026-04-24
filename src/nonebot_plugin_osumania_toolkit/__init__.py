@@ -7,21 +7,7 @@ require("nonebot_plugin_localstore")
 
 from nonebot_plugin_localstore import get_plugin_cache_dir
 CACHE_DIR = get_plugin_cache_dir()
-from .matcher import (
-    acc,
-    analyze,
-    cvtscore,
-    delta,
-    ett,
-    lifebar,
-    mapview,
-    omtk,
-    pattern,
-    percy,
-    pressingtime,
-    scatter,
-    spectrum,
-)
+from .matcher import *
 from .config import Config
 from .file.file import cleanup_old_cache
 
