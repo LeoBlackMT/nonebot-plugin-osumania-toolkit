@@ -6,6 +6,8 @@
 注：如果你要在Linux上运行，可能要对algorithm/ett/official_minaclac_runner授予执行权限（chmod +x official_minaclac_runner）。
 这与official_minaclac_runner.exe一致，编译自Etterna官方的mina_clac_runner，最大程度上确保与官方算法一致。
 
+本插件使用了我的另一个项目[ManiaMapAnalyser](https://github.com/LeoBlackMT/osumania_map_analyser)中的Mixed难度估计算法，你可以前往[Benchmark](https://leoblackmt.github.io/osumania_map_analyser/?algorithm=Mixed&scope=ALL)查看基于真实谱面数据的估计算法表现。
+
 ## 功能特性
 
 0. **使用/omtk查看帮助信息。**

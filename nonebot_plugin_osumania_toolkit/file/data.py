@@ -161,7 +161,7 @@ class omtk_help_data:
         "8. /pattern 或 /键型 - 谱面详细键型分析\n"
         "9. /percy 或 /投皮 - 投皮修改\n"
         "10. /acc 或 /单曲 - 单曲ACC计算\n"
-        "11. /ett - 将谱面按Etterna方式计算难度\n"
+        "11. /ett 或 /msd - 将谱面按Etterna方式计算难度\n"
         "12. /cvtscore 或 /转换 - 按目标规则重算回放成绩"
     )
     # help_text 结构: (命令, 命令名称, 页码, 总页码, 帮助文本)

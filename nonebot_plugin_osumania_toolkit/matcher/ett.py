@@ -24,7 +24,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
-ett = on_command("ett", block=True)
+ett = on_command("ett", aliases={"msd"}, block=True)
 
 
 @ett.handle()
