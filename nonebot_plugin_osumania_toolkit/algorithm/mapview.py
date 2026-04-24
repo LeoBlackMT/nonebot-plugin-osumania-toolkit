@@ -10,8 +10,10 @@ require("nonebot_plugin_htmlkit")
 from nonebot_plugin_htmlkit import template_to_pic  # type: ignore[import-not-found]
 
 from .convert import convert_mc_to_osu
+from .estimator.mixed import estimate_mixed_result
+from .estimator.sunny import build_sunny_result
 from .patterns import PatternNotManiaError, PatternParseError, analyze_pattern_file
-from .rework import ParseError, NotManiaError, est_diff, get_rework_result
+from .rework import ParseError, NotManiaError, get_rework_result
 from .utils import extract_zip_file, is_mc_file, resolve_meta_data
 
 
@@ -274,6 +276,21 @@ async def analyze_mapview_chart(
         detail = _format_parse_error_detail(e)
         raise ParseError(f"Rework 解析阶段失败: {detail}") from e
 
+    sunny_result = build_sunny_result(sr, ln_ratio, column_count)
+
+    try:
+        mixed_result = await asyncio.to_thread(
+            estimate_mixed_result,
+            str(target_file),
+            speed_rate,
+            od_flag,
+            cvt_flag,
+            sunny_result,
+        )
+        mixed_diff_text = str(mixed_result.get("estDiff", sunny_result["estDiff"]))
+    except Exception:
+        mixed_diff_text = sunny_result["estDiff"]
+
     try:
         pattern_result = await analyze_pattern_file(str(target_file), rate=speed_rate)
     except PatternParseError as e:
@@ -311,7 +328,7 @@ async def analyze_mapview_chart(
     if extra_parts:
         mod_line += f" ({', '.join(extra_parts)})"
 
-    diff_top, diff_bottom = _split_diff_lines(est_diff(sr, ln_ratio, column_count))
+    diff_top, diff_bottom = _split_diff_lines(mixed_diff_text)
     star_bg = _color_for(sr, STAR_BG_STOPS, "#6d7894")
     star_text_pref = _color_for(sr, STAR_TEXT_STOPS, "#f6fbff")
     star_text = _pick_readable_text_color(sr, star_bg, star_text_pref)
