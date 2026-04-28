@@ -5,7 +5,7 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.exception import FinishedException
 
-from .. import CACHE_DIR
+from ..file.cache import CACHE_DIR
 from ..algorithm.ett import (
     ETTNotManiaError,
     ETTParseError,
@@ -13,12 +13,14 @@ from ..algorithm.ett import (
     OfficialRunnerError,
     analyze_ett_chart,
     analyze_ett_zip,
-    render_ett_card,
 )
+from ..render.ett import render_ett_card
 from ..algorithm.utils import parse_cmd, send_forward_text_messages
-from ..file.file import download_file, download_file_by_id, get_file_url, safe_filename
+from ..api.download import download_file, get_file_url
+from ..api.osu import download_file_by_id
+from ..file.path import safe_filename
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
 
 ett = on_command("ett", aliases={"msd"}, block=True)

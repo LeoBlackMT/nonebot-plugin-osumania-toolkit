@@ -1,9 +1,10 @@
 <div align="center">
-
-# nonebot-plugin-osumania-toolkit
-
-_✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
-
+    <a href="https://v2.nonebot.dev/store">
+        <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo">
+    </a>
+<br/>
+<h1>✨ nonebot-plugin-osumania-toolkit ✨</h1>
+<p>osu!mania 高级分析功能和实用工具</p>
 
 <a href="./LICENSE">
     <img src="https://img.shields.io/github/license/LeoBlackMT/nonebot-plugin-osumania-toolkit.svg" alt="license">
@@ -12,7 +13,7 @@ _✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
     <img src="https://img.shields.io/pypi/v/nonebot-plugin-osumania-toolkit.svg" alt="pypi">
 </a>
 <img src="https://img.shields.io/badge/python-3.10--3.12-blue.svg" alt="python">
-
+<hr/>
 </div>
 
 ## 功能特性
@@ -27,6 +28,23 @@ _✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
 8. **文件格式支持** - 支持.osr、.mr、.osu、.mc多种文件格式，允许图包分析（.osz/.mcz），并支持通过bid或mania谱面网址指定谱面进行分析
 9. **丰富的配置选项** - 可配置键型分析和作弊分析的丰富参数，满足不同需求
 10. **支持模板规则集** - 可自定义规则模板，方便快速使用预设的规则集进行成绩转换等操作。
+
+<details>
+<summary>效果图</summary>
+<p>1. 谱面分析与难度估计</p>
+<img src="img/mapview.jpg" alt="mapview" width="400">
+<p>2. 单曲acc计算</p>
+<p>这里使用了rte作为例子，用于展示自动划分功能</p>
+<img src="img/acc.jpg" alt="mapview" width="400">
+<p>3. 投皮修改</p>
+<img src="img/percy.jpg" alt="mapview" width="400">
+<p>4. 键型分析</p>
+<img src="img/pattern.jpg" alt="mapview" width="400">
+<p>5. Etterna难度计算</p>
+<img src="img/ett.jpg" alt="mapview" width="400">
+<p>6. 成绩转换</p>
+<img src="img/cvtscore.jpg" alt="mapview" width="400">
+</details>
 
 ## 安装方法
 
@@ -69,8 +87,8 @@ _✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
 
 1. 对 bot 发送 `/omtk` 获取帮助信息
 2. 如果插件运行在 Unix 系统上，需要对 `algorithm/ett/official_minaclac_runner` 授予执行权限（`chmod +x official_minaclac_runner`），以确保`/ett`功能正常使用。
-3. 如果需要为`/cvtscore`添加其他规则集，请参考[规则集示例](docs/ruleset-description.jsonc)和[规则集模板示例](docs/ruleset-template-description.jsonc)。
-4. 如果未来Etterna官方算法有更新而本插件尚未更新，或你想使用自定义的算法版本时，可以参考[构建指南](docs/builder_usage.md)自行构建并替换`algorithm/ett/official_minacalc_runner`。
+3. 如果需要为`/cvtscore`添加其他规则集，请参考[规则集示例](https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/blob/main/docs/ruleset-description.jsonc)和[规则集模板示例](https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/blob/main/docs/ruleset-template-description.jsonc)。
+4. 如果未来Etterna官方算法有更新而本插件尚未更新，或你想使用自定义的算法版本时，可以参考[构建指南](https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/blob/main/docs/builder_usage.md)自行构建并替换`algorithm/ett/official_minacalc_runner`。
 5. 关于估计算法的准确度和表现，你可以前往[ManiaMapAnalyser Benchmark](https://leoblackmt.github.io/osumania_map_analyser/?algorithm=Mixed&scope=ALL)查看基于真实谱面数据的评测结果。
 6. 如果你有任何问题或建议，欢迎提交issue或pr。
 
@@ -83,7 +101,7 @@ _✨ 本插件提供多种osu!mania高级分析功能和实用工具 ✨_
 | default_convert_hp | 否 | int | 8 | .mc转.osu的默认HPDrainRate值 |
 | max_file_size_mb | 否 | int | 50 | 允许处理的最大文件大小（MB） |
 
-注: 其他内容的相关配置项过多，这里只列出基础配置部分。如有修改需要请查看[配置文件](src/nonebot_plugin_osumania_toolkit/config.py)中的注释。
+注: 其他内容的相关配置项过多，这里只列出基础配置部分。如有修改需要请查看[配置文件](https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/blob/main/src/nonebot_plugin_osumania_toolkit/config.py)中的注释。
 
 ## 参考内容
 - [Suuny Rework](https://github.com/sunnyxxy/Star-Rating-Rebirth): 使用了Suuny Rework的算法进行难度估计。

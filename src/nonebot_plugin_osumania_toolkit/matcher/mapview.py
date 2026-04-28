@@ -5,34 +5,21 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.exception import FinishedException
 
-from ..algorithm.mapview import analyze_mapview_chart, analyze_mapview_zip, render_analysis_card
-from ..algorithm.patterns import PatternNotManiaError, PatternParseError
-from ..algorithm.rework import ParseError, NotManiaError
+from ..algorithm.mapview import analyze_mapview_chart, analyze_mapview_zip, format_parse_error_for_user
+from ..algorithm.pattern import PatternNotManiaError, PatternParseError
+from ..algorithm.estimator.exceptions import ParseError, NotManiaError
 from ..algorithm.utils import parse_cmd, send_forward_text_messages
-from ..file.file import download_file, download_file_by_id, get_file_url, safe_filename
+from ..render.mapview import render_analysis_card
+from ..api.download import download_file, get_file_url
+from ..api.osu import download_file_by_id
+from ..file.path import safe_filename
 
-from .. import CACHE_DIR
+from ..file.cache import CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
 
 mapview = on_command("mapview", aliases={"rework"}, block=True)
-
-
-def _format_parse_error_for_user(error: Exception) -> str:
-    detail = str(error or "").strip().replace("\n", " ")
-    if not detail:
-        detail = "未知解析错误"
-    if len(detail) > 240:
-        detail = detail[:237] + "..."
-
-    return (
-        "谱面解析失败，无法完成 /mapview。\n"
-        "可能原因：\n"
-        "1. .mc 转换后存在冲突音符（如 LN 尾与同列同毫秒按下重叠）\n"
-        "2. 文件损坏、字段缺失或格式不兼容\n"
-        f"调试信息: {detail}"
-    )
 
 
 @mapview.handle()
@@ -135,7 +122,7 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
     except FinishedException:
         raise
     except (ParseError, PatternParseError) as e:
-        await mapview.finish(_format_parse_error_for_user(e))
+        await mapview.finish(format_parse_error_for_user(e))
     except (NotManiaError, PatternNotManiaError):
         await mapview.finish("该谱面不是 mania 模式，无法分析。")
     except Exception as e:

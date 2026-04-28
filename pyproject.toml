@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-osumania-toolkit"
-version = "1.0.3"
+version = "1.1.0"
 description = "a nonebot plugin with some useful osu!mania utilities"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"

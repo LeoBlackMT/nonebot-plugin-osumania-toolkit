@@ -6,9 +6,9 @@ from nonebot.exception import FinishedException, RejectedException
 from nonebot.params import Arg
 from nonebot.typing import T_State
 
-from .. import CACHE_DIR
+from ..file.cache import CACHE_DIR
 
-from ..algorithm.cvtscore import (
+from ..algorithm.scoring import (
     cleanup_cvtscore_state,
     first_file_segment,
     get_ruleset_quick_help_text,
@@ -17,14 +17,14 @@ from ..algorithm.cvtscore import (
     parse_cvtscore_cmd,
     prepare_cvtscore_state,
     run_cvtscore_conversion,
-    update_cvtscore_state_from_text_input,
-    render_cvtscore_card,
+    update_cvtscore_state_from_text_input
 )
+from ..render.cvtscore import render_cvtscore_card
 from ..algorithm.utils import parse_bid_or_url
 
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
 cvtscore = on_command("cvtscore", aliases={"转换"}, block=True)
 

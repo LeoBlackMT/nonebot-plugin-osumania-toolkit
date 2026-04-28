@@ -5,8 +5,10 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
 from nonebot.exception import FinishedException
 
-from .. import CACHE_DIR
-from ..file.file import safe_filename, download_file, cleanup_temp_file, get_file_url
+from ..file.cache import CACHE_DIR
+from ..file.path import safe_filename
+from ..api.download import download_file, get_file_url
+from ..file.cleanup import cleanup_temp_file
 from ..algorithm.percy import get_current_d, process_ln_image, parse_percy_cmd, LNImageError
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)

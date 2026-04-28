@@ -23,7 +23,10 @@
         "Color": [255, 212, 104, 50],
         "Name": "M3"
     }, {
-        "Accuracy": 0.95,
+        "Requirement": {
+            "Accuracy": 0.95,
+            "JudgementAtMost": [3, 0]
+        },
         "Color": [255, 235, 115, 56],
         "Name": "M4"
     }, {

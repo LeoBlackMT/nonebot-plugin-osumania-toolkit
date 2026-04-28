@@ -6,15 +6,17 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
 from nonebot.log import logger
 
-from ..file.osr_file_parser import osr_file
+from ..parser.osr_file_parser import osr_file
 
-from ..file.draw import plot_life
-from ..file.file import safe_filename, download_file, cleanup_temp_file, get_file_url
+from ..render.lifebar import plot_life
+from ..file.path import safe_filename
+from ..api.download import download_file, get_file_url
+from ..file.cleanup import cleanup_temp_file
 
-from .. import CACHE_DIR
+from ..file.cache import CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-lifebar = on_command("lifebar", aliases={"血条"})
+lifebar = on_command("lifebar", aliases={"血条", "life"})
 
 @lifebar.handle()
 async def handle_lifebar(bot: Bot, event: MessageEvent):

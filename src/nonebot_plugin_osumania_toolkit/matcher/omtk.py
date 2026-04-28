@@ -2,7 +2,7 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import MessageEvent, Bot
 from nonebot.exception import FinishedException
 
-from ..file.data import omtk_help_data
+from ..data import omtk_help_data
 from ..algorithm.utils import send_forward_text_messages
 
 omtk = on_command("omtk")

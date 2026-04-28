@@ -8,16 +8,19 @@ from nonebot.exception import FinishedException
 from nonebot import on_command
 from nonebot.params import Arg
 
-from .. import CACHE_DIR
-from ..file.osu_file_parser import osu_file
-from ..file.osr_file_parser import osr_file
-from ..file.mr_file_parser import mr_file
+from ..file.cache import CACHE_DIR
+from ..parser.osu_file_parser import osu_file
+from ..parser.osr_file_parser import osr_file
+from ..parser.mr_file_parser import mr_file
 
-from ..file.draw import run_plot_comprehensive
-from ..file.file import safe_filename, download_file, download_file_by_id, cleanup_temp_file, get_file_url
+from ..render.comprehensive import run_plot_comprehensive
+from ..file.path import safe_filename
+from ..api.download import download_file, get_file_url
+from ..api.osu import download_file_by_id
+from ..file.cleanup import cleanup_temp_file
 from ..algorithm.utils import parse_bid_or_url, parse_cmd, is_mc_file
-from ..algorithm.analyze import run_analyze_cheating
-from ..algorithm.convert import convert_mr_to_osr, convert_mc_to_osu
+from ..algorithm.detector import run_analyze_cheating
+from ..algorithm.conversion import convert_mr_to_osr, convert_mc_to_osu
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -6,14 +6,16 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
 from nonebot.log import logger
 
-from ..file.osr_file_parser import osr_file
-from ..file.mr_file_parser import mr_file
+from ..parser.osr_file_parser import osr_file
+from ..parser.mr_file_parser import mr_file
 
-from ..file.draw import plot_spectrum
-from ..file.file import safe_filename, download_file, cleanup_temp_file, get_file_url
-from ..algorithm.convert import convert_mr_to_osr
+from ..render.spectrum import plot_spectrum
+from ..file.path import safe_filename
+from ..api.download import download_file, get_file_url
+from ..file.cleanup import cleanup_temp_file
+from ..algorithm.conversion import convert_mr_to_osr
 
-from .. import CACHE_DIR
+from ..file.cache import CACHE_DIR
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 

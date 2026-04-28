@@ -2,7 +2,7 @@
   ////////////////////////////////////////////////////////////////////////////
   // 模板 ruleset 示例
   // - 这是一个带注释的示例，程序实际读取 .ruleset 文件时要求是纯 JSON（不带注释）。
-  // - 本文件展示本插件支持的“Template + Ruleset”双层格式。
+  // - 本文件展示本插件支持的“Template + Ruleset”双层格式。请注意，不同于 ruleset-description.jsonc 中的规则集文件，模板文件是本插件定义的扩展格式，不能被 Interlude 使用。
   // - 实际使用时，请删除所有注释（即所有被 // 和 /* */ 包围的内容），并确保文件扩展名为 .ruleset。随后将文件置于.venv/lib/site-packages/nonebot_plugin_osumania_toolkit/rulesets/templates/目录下（或其他已配置的目录）。
   // - Template 部分定义了一个可参数化的模板，Ruleset 部分则是使用该模板的具体规则集。
   // - Ruleset 的结构必须满足 ruleset-description.jsonc 中的要求，且可以使用 Template.Variables 定义的变量（通过 {{var}} 占位符）来简化表达式和文本。
@@ -11,8 +11,8 @@
 
   "Template": {
     // 模板类型
-    // - 当前实现仅支持 "formula"
-    // - 其他值会导致模板构建失败（TemplateError）
+    // - 当前实现仅支持 "formula"，未来可能会添加其他类型。
+    // - 其他值会导致模板构建失败（raise exception: TemplateError）
     // - "fomula" 表示这是一个基于公式的模板，实际处理时会根据Template定义的参数和变量渲染出一个普通的ruleset。
     "Type": "formula",
 
@@ -150,11 +150,14 @@
         "TimingWindows": null
       }
     ],
-    // 注：Requirement 只能二选一：ComboBreaksAtMost 或 JudgementAtMost。
     "Lamps": [
       { "Name": "FC",  "Color": [255, 80, 255, 80],   "Requirement": { "ComboBreaksAtMost": 0 } },
       { "Name": "SDG", "Color": [255, 160, 255, 160], "Requirement": { "JudgementAtMost": [2, 9] } },
-      { "Name": "MFC", "Color": [255, 160, 255, 255], "Requirement": { "JudgementAtMost": [1, 0] } }
+      { "Name": "MFC", "Color": [255, 160, 255, 255], "Requirement": { "JudgementAtMost": [1, 0] } },
+      { "Name": "99% FC", "Color": [255, 200, 255, 200], "Requirement": [
+        { "Accuracy": 0.99 },
+        { "ComboBreaksAtMost": 0 }
+      ]}
     ],
     "Grades": [
       { "Name": "D", "Accuracy": 0.0,  "Color": [255, 200, 163, 155] },

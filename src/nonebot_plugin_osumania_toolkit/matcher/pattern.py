@@ -10,21 +10,24 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.exception import FinishedException
 
-from ..algorithm.convert import convert_mc_to_osu
+from ..algorithm.conversion import convert_mc_to_osu
 from ..algorithm.utils import extract_zip_file
-from ..algorithm.patterns import (
+from ..algorithm.pattern import (
     PatternNotManiaError,
     PatternParseError,
     analyze_pattern_file,
     format_pattern_result_text,
 )
-from ..algorithm.patterns.draw import build_pattern_card_data, render_pattern_card
+from ..algorithm.pattern.card import build_pattern_card_data
+from ..render.pattern import render_pattern_card
 from ..algorithm.utils import parse_cmd, is_mc_file, resolve_meta_data, send_forward_text_messages
-from ..file.file import download_file, download_file_by_id, get_file_url, safe_filename
+from ..api.download import download_file, get_file_url
+from ..api.osu import download_file_by_id
+from ..file.path import safe_filename
 
-from .. import CACHE_DIR
+from ..file.cache import CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
 
 pattern = on_command("pattern", aliases={"键型"}, block=True)

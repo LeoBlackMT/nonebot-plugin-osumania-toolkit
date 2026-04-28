@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ...file.osu_file_parser import osu_file
+from ...parser.osu_file_parser import osu_file
 from .exceptions import NotManiaError, ParseError
 
 

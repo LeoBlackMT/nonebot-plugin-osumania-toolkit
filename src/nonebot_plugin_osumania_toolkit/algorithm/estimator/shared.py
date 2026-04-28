@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ...file.osu_file_parser import osu_file
+from ...parser.osu_file_parser import osu_file
 
 
 def normalize_cvt_flags(value: Any) -> tuple[bool, bool, str]:

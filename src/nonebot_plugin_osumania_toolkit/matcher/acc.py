@@ -10,9 +10,12 @@ from nonebot.matcher import Matcher
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException, RejectedException
 
-from .. import CACHE_DIR
-from ..file.file import safe_filename, download_file, cleanup_paths, get_file_url, download_file_by_id
-from ..algorithm.acc_calculate import (
+from ..file.cache import CACHE_DIR
+from ..file.path import safe_filename
+from ..api.download import download_file, get_file_url
+from ..api.osu import download_file_by_id
+from ..file.cleanup import cleanup_paths
+from ..algorithm.acc import (
     calculate_acc_from_dan, 
     calculate_acc,
     calculate_acc_change_from_dan,
@@ -24,7 +27,7 @@ from ..algorithm.acc_calculate import (
 )
 from ..algorithm.utils import parse_osu_filename
 from ..algorithm.utils import is_mc_file
-from ..algorithm.convert import convert_mc_to_osu
+from ..algorithm.conversion import convert_mc_to_osu
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +34,8 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
 
 def _resolve_model_path() -> Path:
     candidates = [
-        Path(__file__).resolve().parents[2] / "assets" / "companella" / "dan_model.onnx",
-        Path(r"C:\Users\Leo_BlackLT\Desktop\Dev\tosu\osumania_map_analyser\ManiaMapAnalyser by Leo_Black\js\estimator\companella\dan_model.onnx"),
+        Path(__file__).resolve().parent / "dan_model.onnx",
+        # 未来可以支持更多候选路径，例如用户自定义路径或环境变量指定路径
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -47,6 +46,12 @@ def _resolve_model_path() -> Path:
 def _extract_first_numeric_value(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
+    if isinstance(value, np.generic):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        flattened = value.reshape(-1)
+        if flattened.size:
+            return _extract_first_numeric_value(flattened[0])
     if isinstance(value, (list, tuple)) and value:
         return _extract_first_numeric_value(value[0])
     if hasattr(value, "data"):

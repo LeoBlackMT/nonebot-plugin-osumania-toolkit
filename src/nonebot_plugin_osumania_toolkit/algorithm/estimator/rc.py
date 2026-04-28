@@ -2,39 +2,11 @@ from __future__ import annotations
 
 import math
 from typing import Any
+from ...data import estimator_data
 
-
-GREEK_BY_INDEX = [
-    "Alpha",
-    "Beta",
-    "Gamma",
-    "Delta",
-    "Epsilon",
-    "Emik Zeta",
-    "Thaumiel Eta",
-    "CloverWisp Theta",
-    "Iota",
-    "Kappa",
-]
-
-RC_TIER_CANDIDATES = (
-    {"suffix": "low", "offset": -0.4},
-    {"suffix": "mid/low", "offset": -0.2},
-    {"suffix": "mid", "offset": 0.0},
-    {"suffix": "mid/high", "offset": 0.2},
-    {"suffix": "high", "offset": 0.4},
-)
-
-DAN_MEANS = {
-    "Alpha": 6.562,
-    "Beta": 6.957,
-    "Gamma": 7.459,
-    "Delta": 7.939,
-    "Epsilon": 9.095,
-    "Zeta": 9.473,
-    "Eta": 10.162,
-    "Theta": 10.782,
-}
+GREEK_BY_INDEX = estimator_data.GREEK_BY_INDEX
+RC_TIER_CANDIDATES = estimator_data.RC_TIER_CANDIDATES
+DAN_MEANS = estimator_data.DAN_MEANS
 
 
 def clamp(value: float, minimum: float, maximum: float) -> float:

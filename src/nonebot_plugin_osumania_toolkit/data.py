@@ -1,0 +1,1217 @@
+import json
+import re
+from pathlib import Path
+
+# ==========辅助函数==========
+
+def format_list(dans: list, items_per_line: int = 5) -> str:
+    """
+    格式化列表数据，每行显示指定数量的数据
+    
+    参数:
+        dans: 列表
+        items_per_line: 每行显示的数据数量
+    
+    返回:
+        格式化后的字符串
+    """
+    formatted_lines = []
+    for i in range(0, len(dans), items_per_line):
+        line = dans[i:i + items_per_line]
+        formatted_lines.append(", ".join(line))
+    return "\n".join(formatted_lines)
+
+def _get_dan_group_name(dan_name: str) -> str:
+    """根据段位命名规则返回分组名。"""
+    greek_names = {"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "spz"}
+
+    if dan_name.startswith("wds0_"):
+        return "wds0"
+    if dan_name.startswith("xfpsb"):
+        return "xfpsb"
+    if dan_name.startswith("7kln"):
+        return "7kln"
+    if dan_name.startswith("7k"):
+        return "7k"
+    if dan_name.startswith("ln"):
+        return "ln"
+    if dan_name.startswith("senpaiex"):
+        return "senpaiex"
+    if dan_name.startswith("senpai"):
+        return "senpai"
+    if dan_name.startswith("spex"):
+        return "spex"
+    if re.match(r"^ex(?:\d+v\d(?:\.\d+)?|fv\d)$", dan_name):
+        return "ex"
+    if re.match(r"^\d+danv\d$", dan_name):
+        return "danv"
+    if re.match(r"^rf\d+$", dan_name) or dan_name in greek_names:
+        return "rf/reform"
+    if dan_name == "haku":
+        return "misc"
+    return "other"
+
+def format_dan_list_grouped(dans: list, items_per_line: int = 5) -> str:
+    """按前缀分组并格式化段位列表。"""
+    groups = {}
+    for dan in sorted(dans):
+        group_name = _get_dan_group_name(dan)
+        groups.setdefault(group_name, []).append(dan)
+
+    preferred_order = [
+        "danv",
+        "ex",
+        "spex",
+        "rf/reform",
+        "ln",
+        "xfpsb",
+        "7k",
+        "7kln",
+        "senpai",
+        "senpaiex",
+        "wds0",
+        "misc",
+        "other",
+    ]
+
+    ordered_group_names = [name for name in preferred_order if name in groups]
+    ordered_group_names.extend(sorted(name for name in groups if name not in preferred_order))
+
+    formatted_sections = []
+    for group_name in ordered_group_names:
+        formatted_sections.append(f"[{group_name}]")
+        formatted_sections.append(format_list(groups[group_name], items_per_line))
+
+    return "\n\n".join(formatted_sections)
+
+
+def _build_cvtscore_ruleset_listing_text() -> str:
+    """构建 /cvtscore 可用模板与具体 ruleset 列表。"""
+    root = Path(__file__).resolve().parent.parent / "rulesets"
+    templates_dir = root / "templates"
+
+    lines: list[str] = [""]
+
+    template_rows: list[str] = []
+    try:
+        template_files = sorted(list(templates_dir.glob("*.ruleset")), key=lambda p: p.stem.lower())
+    except Exception:
+        template_files = []
+
+    for template_file in template_files:
+        name = template_file.stem
+        summary = "(无说明)"
+
+        try:
+            content = template_file.read_text(encoding="utf-8-sig")
+            raw = json.loads(content)
+            template_meta = raw.get("Template") if isinstance(raw, dict) else None
+            if isinstance(template_meta, dict):
+                raw_name = template_meta.get("Name")
+                raw_summary = template_meta.get("Summary")
+                if isinstance(raw_name, str) and raw_name.strip():
+                    name = raw_name.strip()
+                if isinstance(raw_summary, str) and raw_summary.strip():
+                    summary = raw_summary.strip()
+        except Exception:
+            pass
+        
+        if summary:
+            template_rows.append(f"{name}: {summary}")
+        else:
+            template_rows.append(name)
+
+    lines.append("[模板]")
+    if template_rows:
+        lines.extend(template_rows)
+    else:
+        lines.append("(无)")
+
+    try:
+        group_dirs = sorted(
+            [d for d in root.iterdir() if d.is_dir() and d.name.lower() != "templates"],
+            key=lambda d: d.name.lower(),
+        )
+    except Exception:
+        group_dirs = []
+    
+    for group_dir in group_dirs:
+        names = sorted([p.stem for p in group_dir.glob("*.ruleset")], key=lambda x: x.lower())
+        lines.append("")
+        lines.append(f"[{group_dir.name}]")
+        lines.append(format_list(names, items_per_line=6) if names else "(无)")
+
+    return "\n".join(lines)
+
+# ==========数据内容==========
+
+# 帮助文本数据
+class omtk_help_data:
+    main_menu_text = (
+        ">osu!mania工具箱<\n"
+        "发送/omtk显示此信息。发送/omtk <命令名> [页码]获取该命令的详细用法。\n\n"
+        "可用命令：\n"
+        "1. /mapview - 谱面键型分析与难度估计\n"
+        "2. /pressingtime 或 /按压 - 回放按键时间分析\n"
+        "3. /analyze 或 /分析 - 作弊分析\n"
+        "4. /delta 或 /偏差 - 判定偏差柱状图\n"
+        "5. /lifebar 或 /血条 - 血条变化折线图\n"
+        "6. /spectrum 或 /频谱 - 回放频谱\n"
+        "7. /scatter 或 /散点 - 判定散点图\n"
+        "8. /pattern 或 /键型 - 谱面键型分析\n"
+        "9. /percy 或 /投皮 - 投皮修改\n"
+        "10. /acc 或 /单曲 - 单曲ACC计算\n"
+        "11. /ett 或 /msd - 计算谱面MSD\n"
+        "12. /cvtscore 或 /转换 - 按目标规则重算回放成绩\n"
+        "13. /omtk report - 反馈问题"
+    )
+    # help_text 结构：(命令, 命令名称, 页码, 总页码, 帮助文本)
+    help_text = [("rework", "星数重算", "1", "1",
+            "提示：/rework命令现已重定向至/mapview，后者统一提供键型分析和难度估计功能。\n请使用/mapview命令来分析谱面键型和估计难度，支持更多参数和模组。\n详情请输入/omtk mapview获取命令的使用说明。"),
+            
+            ("pressingtime", "回放按键时间分析", "1", "1", 
+            "你可以使用/pressingtime (/按压) 命令的同时回复一个 .osr/.mr 文件以分析其按压时长分布图。"),
+            
+            ("analyze", "作弊分析", "1", "3", 
+            "*警告* 该命令开销较大，请勿滥用。\n-注意- 作弊分析由算法生成，仅供参考，仍处于早期实验阶段，如有问题请反馈。\n/analyze (/分析) 命令基于回放和谱面做多维度检测（时域、频谱、delta_t）。发送命令的同时回复 .osr/.mr 触发分析；指定 bid (或输入网址)会直接分析 delta_t；未指定 bid 时可继续发送 .osu/.mc 或输入 1 执行无谱面分析。\n命令格式：/analyze [b<bid>]\n示例：/analyze b4094064"),
+            
+            ("analyze", "作弊分析", "2", "3",
+            "分析结果图片说明：\n当提供谱面时，将生成四格图：\n1. 按压时长分布图（左上）：各轨道的按压时长分布，异常高峰/分布差异可能意味着宏或脚本。\n2. 脉冲序列频谱图（右上）：回放按键序列的频谱，突出高频峰可用于发现固定速度的脚本或检测采样率。\n3. delta_t 直方图（左下）：按键时间与谱面时间的偏差分布柱状图，过窄或尖峰异常需关注。\n4. delta_t 散点图（右下）：偏差随时间的散点，固定偏移或规则走势可能可疑。\n\n不提供谱面时，只生成前两个图表。"),
+
+            ("analyze", "作弊分析", "3", "3",
+            "机器人返回说明：\n- 文本会按分析模块给出结论：'时域与按压时长分析'、'脉冲序列分析'、'偏移分析'，若检测到异常会在结论前标记 <!> (作弊) 或 <*> (可疑)。\n- 常见术语速览：\n1. 轨道相似度：各列按压分布的相似程度，过高/过低都不正常。\n2. 隐频/主峰 Hz：按键节奏在频谱中的突出频率，高频大峰常见于脚本。\n3. delta_t：打击时间与谱面时间差，标准差/独特值越小越刻板。\n4. MAD：中位绝对偏差，衡量波动幅度。\n5. 记忆/AR1/BDS：偏移序列的自相关与非线性记忆度，过于规则可能脚本。\n6. 多押同步/模板：同时按键的时间差，若近乎固定或反复复用模板则可疑。\n7. 长空段空敲/Gap：谱面空白区的敲击，数量或节奏过于规律会被标记。\n输出结果仅供参考，请结合图表、录像与常识综合判断。"),
+            
+            ("delta", "判定偏差柱状图", "1", "1", 
+            "你可以使用/delta (/偏差)回复包含 .osr/.mr 文件的消息的同时使用 bid (或输入网址)指定谱面，来显示打击的判定偏差分布(按列着色)。\n命令格式：/delta [b<bid>]\n示例：/delta b4094064（同时回复回放文件）\n"),
+            
+            ("lifebar", "血条变化折线图", "1", "1",
+            "你可以使用/lifebar (/血条)命令回复包含 .osr 文件的消息来显示一个回放的血条变化图表。\n用法：回复包含 .osr 文件的消息，同时发送 /lifebar 命令。"),
+            
+            ("spectrum", "回放频谱", "1", "1",
+            "你可以使用/spectrum (/频谱)命令来显示一个回放的打击频谱图表。\n用法：回复包含 .osr/.mr 文件的消息，同时发送 /spectrum 命令。"),
+            
+            ("scatter", "判定散点图", "1", "1",
+            "你可以使用/scatter (/散点)回复包含 .osr/.mr 文件的消息的同时使用 bid (或输入网址)指定谱面，来显示打击位置的二维散点图。\n命令格式：/scatter [b<bid>]\n示例：/scatter b4094064（同时回复回放文件）\n"),
+
+            ("pattern", "键型分析", "1", "1",
+            "你可以使用/pattern (/键型)分析谱面键型。注意：键型分析由算法生成，仅供参考。LN键型键型分析处于实验性状态，如有问题请反馈。\n用法1：回复一条包含 .osu/.mc/.osz/.mcz 文件的消息，然后发送 /pattern。\n用法2：直接使用谱面ID：/pattern b<bid>\n示例：/pattern b4094064\n说明：如果要获取详细结果，请在命令中添加-d或-detail，随后将以合并转发消息发送。"),
+
+            ("percy", "投皮", "1", "1",
+            "你可以使用/percy (/投皮)命令来查看或修改 LN 面身图片的投机取巧程度。\n用法：回复一条包含 .png 图片文件的消息，同时发送 /percy [d] [lazer|lzr]。（推荐用文件形式发送以避免被压缩）\n参数说明：\n1. d：目标投机取巧程度（整数）。不填写时仅识别并返回当前程度。\n2. lazer/lzr：按 Lazer 规则处理与显示（可选）。\n示例：/percy（仅识别当前程度）\n/percy 150（将投皮程度调整到 150px）\n/percy 225 lzr（按 Lazer 模式调整）\n注意:\n1. Lazer 模式会进行 -75px 修正（下限 0），同时将图片长度固定在32800px。\n2. 本程序暂不支持渐变颜色面身、非单一颜色、身尾分离或含有图案面身的皮肤。\n3. 请确保回复的图片文件为 .png 格式。\n\n如果你需要批处理、修复面尾白线等高级功能，请前往仓库LeoBlackMT/percy_skin_editor"),
+            
+            ("acc", "单曲ACC计算", "1", "3",
+            "你可以使用/acc (/单曲)命令来计算osu!mania段位的单曲ACC，或通过单曲ACC推算段内变化。\n支持两种使用方式：\n1. 直接命令模式: /acc [-r] <段位名> <acc>\n/acc [-r] b<bid> [单曲个数] <acc> [-sv2]\n2. 交互模式: 直接发送 /acc [-r]，然后按照提示进行操作。\n本命令可以根据bid或提供文件自动划分单曲且支持自定义物量以及单曲个数。\n\n注意事项:\n1. 使用 ‘-’ 分隔acc。如 99.4-99.3-98.8-97.6\n2. 使用 ‘,’ (半角) 分隔自定义物量。如1145,1419,1981(3首歌的段位)\n3. 支持上传 .osu/.mc 谱面文件。\n4. 命令中包含 -sv2 （即sv2标识）时启用sv2模组\n5. 命令中包含 -r （即反向计算标识）时通过单曲ACC推算段内变化\n\n查看可用段位列表请发送: /omtk acc 2"),
+            
+            ("acc", "单曲ACC计算", "2", "3",
+            "可用段位列表(*替换为具体的数字，$替换为版本):\n1. Malody 4K Dan: 使用 *danv$ 或 ex*v$\n2. Malody 4K Extra Dan v2 (Sample): 使用 spex*\n3. osu!mania 4K Dan ~ REFORM (DDMythical): 使用 rf* 或 希腊字母(如alpha)\n备注: zeta和eta默认为Thaumiel，spz为Emik，额外支持haku(白段)\n4. osu!mania 4K LN Dan Courses v2: 使用 ln* \n5. xfpsb: 使用 xfpsb*, 其中*还可以是f \n6. wds0 Dan: 使用 wds0_* ,其中*还可以是j,n,f\n7. Senpai Dan v1: 使用 senpai* 或 senpaiex* \n8. osu!mania 7K Regular Dan Course: 使用 7k*dan 或 7k*, 其中后者包含s,g,z,a \n9. osu!mania 7K LN Dan Course: 使用 7kln*, 其中*还可以是s,g,z,a \n\n查看全部内置段位详情请发送: /omtk acc 3"),
+            
+            ("acc", "单曲ACC计算", "3", "3",
+            "全部内置段位列表:\n(正在加载...)"),
+
+            ("mapview", "键型分析与难度估计", "1", "2",
+            "你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来分析键型和估计难度。本命令别名/rework。\n命令格式：/mapview b<bid> +[mods] x[speed] OD[OD] \n示例：/mapview b4094064 +EZHO x1.25\n/mapview b4094064 +IN OD8\n警告：图包分析开销较大，请勿滥用。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 部分模组和参数冲突。"),
+            
+            ("mapview", "键型分析与难度估计", "2", "2",
+            "/mapview 参数说明：\n- bid: 以 b 开头，后跟整数，从官网获取谱面。或输入网址。\n- mods: 以 + 开头，后跟模组名缩写（支持 HR/EZ、DT/HT、IN/HO、DC/NC）。不区分大小写，格式同雨沐机器人。\n- speed: 以 x 或 * 开头，后跟倍速数值（如 x1.5）。倍速必须在 0.25 到 3.0 之间。\n- OD: 以 OD 开头, OD值必须在 -15 到 15 之间。"),
+            
+            ("ett", "Etterna难度计算", "1", "1",
+             "你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来计算谱面MSD。\n命令格式：/ett b<bid> x[speed]\n示例：/ett b4094064 x1.25\n警告：图包分析开销较大，请勿滥用。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 该命令仅支持 rate（如 x1.5），不支持 mods、OD 覆写和 IN/HO。\n3. 计算结果仅供参考，MSD在不同版本下因算法差异可能不同，本插件使用0.74.0 MinaClac。\n4. 命令别名 /msd"),
+
+            ("cvtscore", "成绩转换", "1", "3",
+             "你可以使用 /cvtscore (/转换) 将同一回放按目标 ruleset 重算成绩。\n"
+             "输入：回放(.osr/.mr) + 谱面(bid 或 .osu/.mc) + 目标 ruleset。\n"
+             "注意：该功能目前处于实验性状态，如有问题请反馈。"
+             "命令示例：\n"
+             "1. /cvtscore Quaver/chill sc diff4 （然后发送回放）\n"
+             "2. /cvtscore b4094064 -sv2 （然后发送回放和谱面）\n"
+             "3. 直接发送 /cvtscore 进入交互模式。\n"
+             "目标 ruleset 写法：模板优先（如 sc diff4、wife3 j7），具体规则用 Group/Name（如 Quaver/chill）。\n"
+             "参数匹配大小写不敏感。查看参数详解：/omtk cvtscore 2；查看全部 ruleset：/omtk cvtscore 3"),
+
+            ("cvtscore", "成绩转换", "2", "3",
+             "/cvtscore 参数详解：\n"
+             "1. 回放文件：支持 .osr / .mr。\n"
+             "2. 谱面输入：.osu / .mc，或 b<bid> / mania 链接。\n"
+             "3. sv2 开关：-sv2 / sv2 / +sv2（开启）；-nosv2 / nosv2 / sv1（关闭）。\n"
+             "4. 目标 ruleset：\n"
+             "   - 模板优先：sc j4、wife3 j7、template/sc diff4\n"
+             "   - 具体规则：Quaver/chill、Malody/A\n"
+             "   - 模板参数支持：diff 4、diff4、diff=4、j7\n"
+             "5. 交互流程：回放 -> 谱面 -> 目标 ruleset。\n"
+             "6. 大小写不敏感：上述所有参数大小写均不敏感。"),
+
+            ("cvtscore", "成绩转换", "3", "3",
+             "全部可用模板和 ruleset：\n" + _build_cvtscore_ruleset_listing_text()),
+            
+            ("report", "反馈问题", "1", "1",
+             "如果你在使用过程中遇到任何问题、错误或有任何建议，欢迎提交GitHub Issues来反馈给开发者：\nhttps://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/issues/new")
+            ]
+    command_aliases = {
+        "按压": "pressingtime",
+        "分析": "analyze",
+        "偏差": "delta",
+        "血条": "lifebar",
+        "频谱": "spectrum",
+        "散点": "scatter",
+        "键型": "pattern",
+        "投皮": "percy",
+        "单曲": "acc",
+        "转换": "cvtscore",
+        }
+
+# 解析器数据
+class file_parser_data:
+    MOD_MAPPING = {
+        0: "None",
+        1: "NoFail",
+        2: "Easy",
+        4: "TouchDevice",
+        8: "Hidden",
+        16: "HardRock",
+        32: "SuddenDeath",
+        64: "DoubleTime",
+        128: "Relax",
+        256: "HalfTime",
+        512: "Nightcore",
+        1024: "Flashlight",
+        2048: "Autoplay",
+        4096: "SpunOut",
+        8192: "Autopilot",
+        16384: "Perfect",
+        32768: "Key4",
+        65536: "Key5",
+        131072: "Key6",
+        262144: "Key7",
+        524288: "Key8",
+        1048576: "FadeIn",
+        2097152: "Random",
+        4194304: "Cinema",
+        8388608: "TargetPractice",
+        16777216: "Key9",
+        33554432: "Coop",
+        67108864: "Key1",
+        134217728: "Key3",
+        268435456: "Key2",
+        536870912: "ScoreV2",
+        1073741824: "Mirror",
+    }
+
+# 星数颜色数据与函数
+class sr_color:
+    STAR_BG_STOPS = [
+        (0.0, "#aaaaaa"),
+        (0.9, "#4bb3fd"),
+        (2.0, "#4fffd5"),
+        (3.0, "#d3f557"),
+        (4.0, "#fda265"),
+        (5.0, "#f94d79"),
+        (6.0, "#b64cc1"),
+        (7.0, "#5654ca"),
+        (8.0, "#14117d"),
+        (9.0, "#000000"),
+        (9999.9, "#000000"),
+    ]
+    STAR_TEXT_STOPS = [
+        (0.0, "#000000"),
+        (6.49, "#000000"),
+        (6.5, "#ffd966"),
+        (8.9, "#ffd966"),
+        (9.0, "#f6f05c"),
+        (10.0, "#ff7a69"),
+        (11.0, "#e74a95"),
+        (12.0, "#9a57ce"),
+        (12.39, "#6563de"),
+        (9999.9, "#6563de"),
+    ]
+    
+    def _hex_to_rgb(self, hex_color: str) -> tuple[int, int, int]:
+        color = hex_color.lstrip("#")
+        if len(color) == 3:
+            color = "".join(ch + ch for ch in color)
+        value = int(color, 16)
+        return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
+    
+    def _rgb_to_hex(self, r: int, g: int, b: int) -> str:
+        return f"#{r:02x}{g:02x}{b:02x}"
+    
+    def _interpolate_color(self, hex_a: str, hex_b: str, t: float) -> str:
+        ar, ag, ab = self._hex_to_rgb(hex_a)
+        br, bg, bb = self._hex_to_rgb(hex_b)
+        r = round(ar + (br - ar) * t)
+        g = round(ag + (bg - ag) * t)
+        b = round(ab + (bb - ab) * t)
+        return self._rgb_to_hex(r, g, b)
+    
+    def _color_for(self, value: float, stops: list[tuple[float, str]], fallback: str) -> str:
+        if not isinstance(value, (int, float)):
+            return fallback
+        if value <= stops[0][0]:
+            return stops[0][1]
+        for i in range(len(stops) - 1):
+            lv, lc = stops[i]
+            rv, rc = stops[i + 1]
+            if lv <= value <= rv:
+                t = (value - lv) / (rv - lv or 1.0)
+                return self._interpolate_color(lc, rc, t)
+        return stops[-1][1]
+    
+    def convert(self, v: int) -> float:
+            c = v / 255.0
+            if c <= 0.03928:
+                return c / 12.92
+            return ((c + 0.055) / 1.055) ** 2.4
+        
+    def _relative_luminance(self, hex_color: str) -> float:
+        r, g, b = self._hex_to_rgb(hex_color)
+        return 0.2126 * self.convert(r) + 0.7152 * self.convert(g) + 0.0722 * self.convert(b)
+
+    def _contrast_ratio(self, hex_a: str, hex_b: str) -> float:
+        l1 = self._relative_luminance(hex_a)
+        l2 = self._relative_luminance(hex_b)
+        bright = max(l1, l2)
+        dark = min(l1, l2)
+        return (bright + 0.05) / (dark + 0.05)
+
+    def _pick_readable_text_color(self, star_value: float, bg_color: str, preferred_color: str) -> str:
+        if isinstance(star_value, (int, float)) and star_value > 12:
+            return "#6563de"
+        if isinstance(star_value, (int, float)) and 6.0 <= star_value <= 6.49:
+            return "#000000"
+        if isinstance(star_value, (int, float)) and 6.5 <= star_value <= 8.9:
+            return "#ffd966"
+        preferred = preferred_color or "#f6fbff"
+        if self._contrast_ratio(bg_color, preferred) >= 4.5:
+            return preferred
+        candidate_dark = "#111111"
+        candidate_light = "#f6fbff"
+        candidate_gold = "#FFD966"
+        dark_ratio = self._contrast_ratio(bg_color, candidate_dark)
+        light_ratio = self._contrast_ratio(bg_color, candidate_light)
+        gold_ratio = self._contrast_ratio(bg_color, candidate_gold)
+        if 7.0 <= star_value <= 10.0:
+            if gold_ratio >= 4.5:
+                return candidate_gold
+            return candidate_light if light_ratio >= dark_ratio else candidate_dark
+        if dark_ratio >= 4.5 or dark_ratio > light_ratio:
+            return candidate_dark
+        return candidate_light
+
+    def _mode_tag_class(self, tag: str) -> str:
+        normalized = tag if tag in {"RC", "LN", "HB", "Mix"} else "Mix"
+        return f"mode-{normalized.lower()}"
+
+# 估计算法数据
+class estimator_data:
+    AZUSA_CONFIG = {
+        "rcLnRatioLimit": 0.18,
+        "minNotes": 80,
+        "rowToleranceMs": 2,
+        "quantiles": {"q99": 0.99, "q97": 0.97, "q94": 0.94},
+        "skillWeights": {"speed": 0.38, "stamina": 0.26, "chord": 0.18, "tech": 0.18},
+        "localPower": 2.15,
+        "postPower": 3.4,
+        "decayWindowsMs": [140, 280, 560, 980],
+        "decayWeights": [0.34, 0.30, 0.22, 0.14],
+        "rcBlendWeights": {
+            "azusaResidual": 0.05,
+            "sunnyResidual": 0.15,
+            "lowRangeLift": 0.40,
+            "danielFallback": 0.75,
+            "azusaFallback": 0.20,
+            "sunnyFallback": 0.08,
+            "globalOffset": -0.50,
+        },
+    }
+    GREEK_BY_INDEX = [
+        "Alpha",
+        "Beta",
+        "Gamma",
+        "Delta",
+        "Epsilon",
+        "Emik Zeta",
+        "Thaumiel Eta",
+        "CloverWisp Theta",
+        "Iota",
+        "Kappa",
+    ]
+    RC_TIER_CANDIDATES = (
+        {"suffix": "low", "offset": -0.4},
+        {"suffix": "mid/low", "offset": -0.2},
+        {"suffix": "mid", "offset": 0.0},
+        {"suffix": "mid/high", "offset": 0.2},
+        {"suffix": "high", "offset": 0.4},
+    )
+    DAN_MEANS = {
+        "Alpha": 6.562,
+        "Beta": 6.957,
+        "Gamma": 7.459,
+        "Delta": 7.939,
+        "Epsilon": 9.095,
+        "Zeta": 9.473,
+        "Eta": 10.162,
+        "Theta": 10.782,
+    }
+    AZUSA_CALIBRATION_LOW_BLOCKS = [
+        [1.9220, 1.9220, 1.0000],
+        [2.3660, 2.7684, 1.6667],
+        [2.8394, 2.8394, 2.0000],
+        [2.8584, 3.7162, 2.3333],
+        [3.7798, 3.7798, 3.0000],
+        [3.8667, 3.8667, 3.0000],
+        [4.2067, 5.2039, 4.3333],
+        [5.2506, 5.7713, 5.0667],
+        [5.8603, 6.1512, 5.3333],
+        [6.3292, 6.8785, 6.0000],
+        [7.1715, 7.3617, 6.2000],
+        [7.4079, 7.8734, 7.2000],
+        [8.0160, 8.4003, 8.2500],
+        [8.4133, 8.4133, 9.0000],
+        [8.9031, 9.4775, 9.5667],
+        [9.6488, 9.6488, 10.0000],
+        [9.8301, 9.8301, 10.3000],
+    ]
+    AZUSA_CALIBRATION_HIGH_BLOCKS = [
+        [11.4336, 11.4336, 10.4000],
+        [11.4436, 11.4436, 10.5000],
+        [11.6012, 11.6665, 10.6500],
+        [11.6696, 12.2317, 11.5000],
+        [12.3295, 12.3919, 11.7500],
+        [12.5238, 12.5238, 12.0000],
+        [12.5318, 12.8329, 12.1400],
+        [12.8605, 12.9781, 12.2800],
+        [12.9868, 13.1170, 12.7800],
+        [13.2003, 13.4418, 12.7857],
+        [13.4660, 13.5829, 12.9250],
+        [13.6044, 13.9924, 13.3667],
+        [14.0583, 14.0583, 13.4000],
+        [14.0795, 14.2266, 13.4600],
+        [14.2346, 14.2346, 13.6000],
+        [14.2414, 14.2414, 13.7000],
+        [14.2903, 14.2903, 14.0000],
+        [14.3258, 14.4760, 14.1200],
+        [14.5365, 14.6006, 14.1333],
+        [14.7269, 14.8716, 14.1333],
+        [15.0048, 15.0048, 14.4000],
+        [15.0521, 15.0521, 14.4000],
+        [15.0521, 15.0521, 14.4000],
+        [15.0950, 15.0950, 14.4000],
+        [15.2335, 15.2335, 14.4000],
+        [15.2388, 15.5821, 14.7385],
+        [15.6977, 15.7002, 14.8500],
+        [15.7535, 16.1593, 15.0667],
+        [16.2009, 16.2958, 15.1000],
+        [16.3172, 16.4748, 15.7600],
+        [16.5620, 16.9083, 15.9833],
+        [16.9485, 16.9485, 16.0000],
+        [17.0216, 17.3799, 16.1000],
+        [17.4616, 17.4616, 16.4000],
+        [17.5167, 17.5167, 16.4000],
+        [17.5306, 17.9077, 16.6400],
+        [18.1973, 18.1973, 17.2000],
+        [18.2026, 18.2026, 17.2000],
+        [18.4562, 19.3477, 17.9500],
+    ]
+    AZUSA_ISOTONIC_POINTS = [
+        [1.2900, 1], [1.2900, 1], [1.3900, 1], [1.3900, 1],
+        [1.4700, 1], [1.4700, 1], [1.9000, 2], [1.9000, 2],
+        [2.0600, 2], [2.2200, 2], [2.3200, 2], [2.3200, 2],
+        [2.5100, 3], [2.5100, 3], [2.9000, 3.3333333333333335], [2.9800, 3.3333333333333335],
+        [4.0100, 4], [4.0100, 4], [4.5100, 4], [4.5100, 4],
+        [4.8300, 4.2], [4.8300, 4.2], [4.9400, 5], [4.9400, 5],
+        [5.0400, 5], [5.0400, 5], [5.2000, 5], [5.2000, 5],
+        [5.2800, 5], [5.2800, 5], [5.3300, 5.666666666666667], [5.5900, 5.666666666666667],
+        [5.7700, 6], [5.7700, 6], [5.8700, 6], [5.8700, 6],
+        [5.8700, 6], [5.8700, 6], [6.0700, 6.6], [6.0700, 6.6],
+        [6.3300, 6.733333333333333], [6.9200, 6.733333333333333],
+        [7.1100, 7], [7.1100, 7], [7.4600, 8.3], [8.0500, 8.3],
+        [8.2500, 8.333333333333334], [8.4800, 8.333333333333334],
+        [9.3200, 9.183333333333334], [9.6200, 9.183333333333334],
+        [9.6400, 9.5], [9.7100, 9.5], [9.9800, 10.325], [10.1500, 10.325],
+        [10.3000, 10.37142857142857], [10.9900, 10.37142857142857],
+        [11.0000, 10.9], [11.0400, 10.9],
+        [11.0700, 11.22857142857143], [11.3600, 11.22857142857143],
+        [11.4500, 11.866666666666667], [11.7400, 11.866666666666667],
+        [11.9300, 12.0875], [12.2000, 12.0875],
+        [12.2900, 12.466666666666667], [12.5200, 12.466666666666667],
+        [12.5600, 12.5], [12.6400, 12.5],
+        [12.7400, 12.56], [12.9200, 12.56],
+        [12.9800, 12.6], [12.9800, 12.6],
+        [12.9900, 12.7], [12.9900, 12.7],
+        [13.0000, 13], [13.0000, 13],
+        [13.0400, 13.266666666666667], [13.2800, 13.266666666666667],
+        [13.2900, 13.533333333333333], [13.3300, 13.533333333333333],
+        [13.3400, 13.55], [13.3600, 13.55],
+        [13.4000, 13.62], [13.5600, 13.62],
+        [13.7200, 13.8], [13.7200, 13.8],
+        [13.9500, 14], [13.9500, 14],
+        [14.0200, 14], [14.0200, 14],
+        [14.0500, 14.05], [14.2000, 14.05],
+        [14.2100, 14.199999999999998], [14.3400, 14.199999999999998],
+        [14.3700, 14.266666666666666], [14.3700, 14.266666666666666],
+        [14.4400, 14.4], [14.4400, 14.4],
+        [14.4400, 14.4], [14.4400, 14.4],
+        [14.4700, 14.5], [14.4700, 14.5],
+        [14.5200, 14.674999999999999], [14.6700, 14.674999999999999],
+        [14.8000, 14.825], [14.9000, 14.825],
+        [14.9300, 15], [15.1500, 15],
+        [15.3100, 15.2], [15.3500, 15.2],
+        [15.3700, 15.666666666666666], [15.5300, 15.666666666666666],
+        [15.5400, 15.675], [15.7200, 15.675],
+        [15.7200, 15.8], [15.7200, 15.8],
+        [15.7500, 15.9], [15.7500, 15.9],
+        [15.7800, 16], [16.0700, 16],
+        [16.0900, 16.266666666666666], [16.1500, 16.266666666666666],
+        [16.3500, 16.4], [16.3500, 16.4],
+        [16.3500, 16.4], [16.3500, 16.4],
+        [16.4100, 16.4], [16.5100, 16.4],
+        [16.5300, 16.533333333333335], [16.6500, 16.533333333333335],
+        [17.5500, 17.2], [17.5500, 17.2],
+        [17.6800, 17.2], [17.6800, 17.2],
+        [17.9100, 17.95], [18.0200, 17.95],
+    ]
+
+# 段位物量数据
+class dan_data:
+    """
+    段位物量数据
+    部分数据来源：
+    https://github.com/uzxn/acc/blob/main/data.js
+    结构: dict, 键为段位名，值为:
+        [n, note1, ..., noteN] 或
+        [n, note1, ..., noteN, sv2_note1, ..., sv2_noteN]
+        
+    忽略的段位：
+    "rf_z": { num: 4, note: [2895, 1292, 1958, 4911], song: ["Koxx - A Fool Moon Night (DDMythical) [Original]", "Lil B - Flex 36 (Skwid, Dump Parade) {1.7}", "Ishikawa Chiaki - Uninstall (Mootz) [Mootz Mix 3]", "Various Artists - Reform Stamina Mega Mix (Various Charters) [Original]"] },
+    "rfsp_ea": { num: 4, note: [2531, 2675, 3560, 2855], song: ["SHK - Log-in (Lynessa) [Lynessa's Jack Collection] {1.235x}", "Silentroom - Nhelv (Guilhermeziat) [Silent] {1.14x}", "DJ Sharpnel - Cyber Inductance (Wh1teh) [Valedumps] {1.0925x}", "antiPLUR - Speed of Link (Adaww) [Light] {1.1875x // cut}"] },
+    "rfsp_eb": { num: 4, note: [1973, 1943, 2411, 3732], song: ["The Quick Brown Fox - Break (beary605) [Smash] {1.3x}", "YUC'e - Future Candy (Leo137) [Minty Fresh Pack 1] {1.5x}", "Shiraishi - Moon-gate (ATTang) [ATTang's Bad Files] {1.25x}", "DJ Sharpnel - Pacific Girls (Fullerene- & IcyWorld) [Nuclear Blast JS Awesome Bomb Filez 5] {1.5x // cut}"] },
+    """
+    dan_notes = {
+        "ln1": [4, 717, 336, 176, 613, 893, 512, 282, 1014],
+        "ln10": [4, 2377, 1656, 1689, 2185, 3925, 3120, 3366, 3655],
+        "ln11": [4, 1864, 1493, 2338, 2529, 3507, 2512, 4430, 4525],
+        "ln12": [4, 1798, 2633, 1822, 2449, 2986, 4811, 3552, 4390],
+        "ln13": [4, 2570, 2452, 2123, 2818, 4725, 4203, 3651, 5061],
+        "ln14": [4, 2319, 2408, 2483, 2158, 4415, 4320, 4318, 3947],
+        "ln15": [4, 3216, 3209, 3278, 3149, 6153, 5661, 5904, 5963],
+        "ln2": [4, 805, 805, 377, 805, 1184, 1414, 705, 1610],
+        "ln3": [4, 836, 921, 612, 1157, 1305, 1342, 880, 1695],
+        "ln4": [4, 907, 1053, 413, 1067, 1469, 1605, 781, 2133],
+        "ln5": [4, 1904, 887, 1380, 1220, 2956, 1613, 1913, 1881],
+        "ln6": [4, 1365, 745, 1219, 1534, 2324, 1412, 1891, 2421],
+        "ln7": [4, 1394, 1119, 832, 1666, 2076, 1971, 1664, 2386],
+        "ln8": [4, 1445, 1318, 1258, 1694, 2694, 2424, 2486, 2560],
+        "ln9": [4, 2500, 1461, 1321, 2307, 4069, 2593, 2425, 3699],
+        
+        "xfpsb1": [4, 1675, 2107, 1569, 2146, 2755, 3979, 2982, 3687],
+        "xfpsb2": [4, 2046, 1958, 2634, 2217, 3664, 3641, 4998, 4052],
+        "xfpsb3": [4, 2568, 1839, 2636, 2235, 4755, 3491, 4816, 4185],
+        "xfpsb4": [4, 2279, 1761, 2291, 2233, 4096, 2983, 3909, 4037],
+        "xfpsb5": [4, 2210, 2190, 1943, 2594, 4250, 3931, 3664, 4695],
+        "xfpsb6": [4, 2633, 3043, 2800, 2611, 5135, 5491, 5362, 4989],
+        "xfpsbf": [4, 2708, 2555, 2583, 2954, 5145, 4797, 4898, 5381],
+        
+        "7k0dan": [4, 1018, 851, 1023, 1223],
+        "7k1dan": [4, 1436, 1814, 1312, 1673],
+        "7k10dan": [4, 3081, 2366, 2511, 3438],
+        "7k2dan": [4, 1411, 1436, 1784, 2154],
+        "7k3dan": [4, 1970, 1906, 1871, 1982],
+        "7k4dan": [4, 2189, 1853, 2108, 2264],
+        "7k5dan": [4, 2087, 2166, 1975, 2391],
+        "7k6dan": [4, 1576, 2818, 2368, 3003],
+        "7k7dan": [4, 2689, 2876, 1938, 2847],
+        "7k8dan": [4, 2366, 2508, 2825, 2936],
+        "7k9dan": [4, 2420, 2672, 2230, 3343],
+        "7ka": [4, 3644, 3174, 3260, 4141],
+        "7kg": [4, 3085, 2500, 2707, 3711],
+        "7ks": [4, 4000, 4502, 3314, 4568],
+        "7kz": [4, 3624, 2722, 3258, 4974],
+        
+        "7kln0": [4, 820, 600, 215, 247, 1122, 898, 430, 424],
+        "7kln1": [4, 1068, 682, 537, 428, 1819, 1075, 1074, 707],
+        "7kln10": [4, 2151, 2496, 1845, 1708, 4297, 4812, 3690, 3402],
+        "7kln2": [4, 1242, 1198, 760, 1221, 1598, 1831, 1520, 2315],
+        "7kln3": [4, 1512, 1350, 323, 899, 2358, 2106, 646, 1606],
+        "7kln4": [4, 1309, 1518, 543, 736, 2129, 2724, 1086, 1381],
+        "7kln5": [4, 1516, 2695, 602, 618, 2687, 4695, 1204, 1059],
+        "7kln6": [4, 1635, 1902, 756, 1081, 2829, 3488, 1512, 2060],
+        "7kln7": [4, 1796, 2093, 1359, 1391, 3386, 3475, 2718, 2738],
+        "7kln8": [4, 2230, 2136, 1465, 1362, 4238, 3638, 2930, 2603],
+        "7kln9": [4, 1900, 2159, 1597, 1677, 3601, 4213, 3194, 3341],
+        "7klna": [4, 3029, 2472, 2553, 2926, 5867, 4915, 5106, 5849],
+        "7klng": [4, 2551, 2326, 2273, 2165, 4962, 4505, 4546, 4306],
+        "7klns": [4, 4073, 3454, 3196, 3721, 6954, 6325, 6392, 7391],
+        "7klnz": [4, 3240, 3025, 3181, 2904, 6314, 5918, 6362, 5756],
+        
+        "haku": [4, 2379, 3073, 3561, 962],
+        
+        "1danv2": [4, 831, 955, 907, 654],
+        "10danv2": [4, 2659, 2188, 2194, 2187],
+        "2danv2": [4, 1152, 850, 950, 969],
+        "3danv2": [4, 1169, 1143, 974, 1347],
+        "4danv2": [4, 1400, 1402, 1685, 1599],
+        "5danv2": [4, 1953, 2250, 2166, 1667],
+        "6danv2": [4, 1487, 1424, 1381, 1587],
+        "7danv2": [4, 1909, 1814, 1777, 2681],
+        "8danv2": [4, 1962, 1067, 2388, 1772],
+        "9danv2": [4, 1799, 2023, 2281, 1787],
+        
+        "ex1v2": [4, 2164, 1952, 1823, 3249],
+        "ex2v2": [4, 2871, 2024, 1871, 2452],
+        "ex2v1.5": [4, 2457, 2239, 2024, 2561],
+        "ex2v1.75": [4, 1944, 2024, 2561, 3089],
+        "ex3v2": [4, 2327, 1593, 2166, 2200],
+        "ex4v2": [4, 2731, 2653, 2033, 2796],
+        "ex5v2": [4, 3229, 2731, 2561, 2109],
+        "ex6v2": [4, 1766, 1861, 3171, 1680],
+        "ex6v1.75": [4, 2504, 2027, 2444, 3526],
+        "ex7v2": [4, 2339, 2461, 2511, 2177],
+        "ex7v1.75": [4, 2725, 2166, 2545, 3691],
+        "ex8v2": [4, 1929, 2380, 2710, 4675],
+        "ex9v2": [4, 3987, 1874, 4363, 3843],
+        "ex9v1.75": [4, 4427, 3660, 4323, 3044],
+        "exfv2": [4, 3468, 3335, 3698, 5061],
+        
+        "spex1": [4, 1952, 2316, 2098, 2048],
+        "spex2": [4, 2158, 1953, 2196, 3160],
+        "spex3": [4, 2299, 2378, 2677, 2640],
+        "spex4": [4, 1738, 1876, 2079, 2008],
+        "spex5": [4, 2731, 2109, 2365, 2691],
+        "spex6": [4, 1766, 2525, 2167, 3214],
+        "spex7": [4, 2339, 2461, 2142, 3167],
+        "spex8": [4, 2647, 3253, 3204, 4046],
+        "spex9": [4, 2828, 3663, 2865, 2777],
+        
+        "0danv3": [4, 492, 529, 595, 681],
+        "1danv3": [4, 695, 621, 718, 1279],
+        "10danv3": [4, 2034, 1740, 2270, 2166],
+        "2danv3": [4, 1397, 1090, 805, 1212],
+        "3danv3": [4, 1055, 1489, 1288, 1789],
+        "4danv3": [4, 1865, 1434, 1284, 1839],
+        "5danv3": [4, 1282, 1706, 1473, 1939],
+        "6danv3": [4, 1694, 1636, 1803, 2115],
+        "7danv3": [4, 1701, 1799, 2132, 1899],
+        "8danv3": [4, 2237, 2081, 2280, 2000],
+        "9danv3": [4, 2374, 1889, 2142, 1810],
+        
+        "ex1v3": [4, 1952, 2013, 1953, 2111],
+        "ex2v3": [4, 2107, 1953, 2386, 2674],
+        "ex3v3": [4, 2518, 2636, 2326, 2511],
+        "ex4v3": [4, 2634, 2212, 2336, 2602],
+        "ex5v3": [4, 2734, 2417, 3089, 2974],
+        "ex6v3": [4, 2483, 2276, 2921, 3194],
+        "ex7v3": [4, 2846, 2260, 2333, 3347],
+        "ex8v3": [4, 3789, 3663, 2424, 3255],
+        "ex9v3": [4, 3888, 3030, 3581, 3700],
+        "exfv3": [4, 2828, 3362, 3393, 5100],
+        
+        "rf1": [4, 878, 696, 954, 1167],
+        "rf10": [4, 1906, 1460, 1723, 2392],
+        "rf2": [4, 1107, 905, 955, 1487],
+        "rf3": [4, 1008, 797, 1047, 1259],
+        "rf4": [4, 905, 1499, 1283, 2071],
+        "rf5": [4, 1293, 1722, 1632, 1903],
+        "rf6": [4, 1487, 1266, 1378, 2186],
+        "rf7": [4, 2114, 1777, 1081, 2734],
+        "rf8": [4, 2177, 1309, 1608, 1589],
+        "rf9": [4, 2114, 2070, 1674, 2272],
+        "alpha": [4, 2265, 1528, 2300, 3334],
+        "beta": [4, 2274, 2308, 1740, 2301],
+        "delta": [4, 2018, 2711, 3268, 2629],
+        "epsilon": [4, 2128, 2552, 2194, 2829],
+        "gamma": [4, 1973, 1980, 1429, 3979],
+        "eta": [4, 3889, 3860, 3863, 3837],
+        "zeta": [4, 3447, 3424, 3409, 3291],
+        "spz": [4, 2438, 1964, 2925, 3497],
+        
+        "senpai1": [4, 752, 1004, 940, 1045],
+        "senpai10": [4, 1933, 1929, 1734, 1930],
+        "senpai2": [4, 978, 791, 1440, 1405],
+        "senpai3": [4, 1242, 1297, 1358, 1378],
+        "senpai4": [4, 1848, 1592, 1558, 1677],
+        "senpai5": [4, 1536, 1877, 1841, 1583],
+        "senpai6": [4, 1523, 1705, 1722, 2111],
+        "senpai7": [4, 1464, 1509, 2052, 2076],
+        "senpai8": [4, 1811, 1771, 2211, 2021],
+        "senpai9": [4, 2096, 1955, 2091, 1957],
+        "senpaiex1": [4, 2425, 1733, 1978, 2233],
+        "senpaiex2": [4, 2428, 2632, 1799, 2668],
+        "senpaiex3": [4, 2148, 2932, 2975, 2052],
+        "senpaiex4": [4, 2362, 2064, 1996, 2752],
+        "senpaiex5": [4, 2715, 2181, 2350, 3748],
+        "senpaiex6": [4, 2472, 2179, 2573, 2606],
+        "senpaiex7": [4, 2816, 2516, 2867, 3503],
+        "senpaiex8": [4, 3131, 2211, 2689, 3552],
+        "senpaiex9": [4, 3486, 3175, 3592, 3189],
+        "senpaiexf": [4, 4207, 3352, 3080, 3450],
+        
+        "wds0_1": [4, 2100, 2050, 2344, 2236],
+        "wds0_10": [4, 4099, 3284, 3212, 3200],
+        "wds0_2": [4, 2148, 3246, 2054, 2125],
+        "wds0_3": [4, 2434, 2952, 2735, 2312],
+        "wds0_4": [4, 2229, 2585, 2022, 2552],
+        "wds0_5": [5, 2597, 3050, 2453, 2361, 2492],
+        "wds0_6": [4, 2581, 3165, 2524, 2513],
+        "wds0_7": [4, 2824, 3045, 3280, 3073],
+        "wds0_8": [4, 3407, 3493, 3195, 2087],
+        "wds0_9": [4, 4444, 2602, 2853, 2411],
+        "wds0_f": [5, 3699, 2966, 5315, 4643, 8438],
+        "wds0_j": [4, 3372, 3940, 2680, 2467],
+        "wds0_n": [4, 3134, 2504, 1040, 2398],
+    }
+
+# 星数段位匹配数据        
+class sr_intervals_data:
+    LN_intervals_4K = [
+        (4.832, 4.898, "LN 5 mid"),
+        (4.898, 4.963, "LN 5 mid/high"),
+        (4.963, 5.095, "LN 5 high"),
+        (5.095, 5.160, "LN 6 low"),
+        (5.160, 5.143, "LN 6 mid/low"),
+        (5.143, 5.213, "LN 6 mid"),
+        (5.213, 5.264, "LN 6 mid/high"),
+        (5.264, 5.314, "LN 6 high"),
+        (5.314, 5.446, "LN 7 low"),
+        (5.446, 5.521, "LN 7 mid/low"),
+        (5.521, 5.577, "LN 7 mid"),
+        (5.577, 5.631, "LN 7 mid/high"),
+        (5.631, 5.686, "LN 7 high"),
+        (5.686, 5.740, "LN 8 low"),
+        (5.740, 5.794, "LN 8 mid/low"),
+        (5.794, 5.853, "LN 8 mid"),
+        (5.853, 5.917, "LN 8 mid/high"),
+        (5.917, 5.981, "LN 8 high"),
+        (5.981, 6.044, "LN 9 low"),
+        (6.044, 6.108, "LN 9 mid/low"),
+        (6.108, 6.175, "LN 9 mid"),
+        (6.175, 6.246, "LN 9 mid/high"),
+        (6.246, 6.318, "LN 9 high"),
+        (6.318, 6.389, "LN 10 low"),
+        (6.389, 6.461, "LN 10 mid/low"),
+        (6.461, 6.534, "LN 10 mid"),
+        (6.534, 6.611, "LN 10 mid/high"),
+        (6.611, 6.687, "LN 10 high"),
+        (6.687, 6.763, "LN 11 low"),
+        (6.763, 6.839, "LN 11 mid/low"),
+        (6.839, 6.898, "LN 11 mid"),
+        (6.898, 6.920, "LN 11 mid/high"),
+        (6.920, 6.941, "LN 11 high"),
+        (6.941, 7.023, "LN 12 low"),
+        (7.023, 7.068, "LN 12 mid/low"),
+        (7.068, 7.136, "LN 12 mid"),
+        (7.136, 7.225, "LN 12 mid/high"),
+        (7.225, 7.313, "LN 12 high"),
+        (7.313, 7.401, "LN 13 low"),
+        (7.401, 7.490, "LN 13 mid/low"),
+        (7.490, 7.578, "LN 13 mid"),
+        (7.578, 7.665, "LN 13 mid/high"),
+        (7.665, 7.753, "LN 13 high"),
+        (7.753, 7.841, "LN 14 low"),
+        (7.841, 7.929, "LN 14 mid/low"),
+        (7.929, 8.013, "LN 14 mid"),
+        (8.013, 8.093, "LN 14 mid/high"),
+        (8.093, 8.173, "LN 14 high"),
+        (8.173, 8.253, "LN 15 low"),
+        (8.253, 8.333, "LN 15 mid/low"),
+        (8.333, 8.389, "LN 15 mid"),
+        (8.389, 8.428, "LN 15 mid/high"),
+        (8.428, 8.470, "LN 15 high"),
+        (8.470, 8.509, "Hypersovae LN 16 low"),
+        (8.509, 8.548, "Hypersovae LN 16 mid/low"),
+        (8.548, 8.586, "Hypersovae LN 16 mid"),
+        (8.586, 8.635, "Hypersovae LN 16 mid/high"),
+        (8.635, 8.908, "Hypersovae LN 16 high"),
+        (8.908, 9.044, "Lnlism LN 17 low"),
+        (9.044, 9.180, "Lnlism LN 17 mid/low"),
+        (9.180, 9.316, "Lnlism LN 17 mid"),
+        (9.316, 9.452, "Lnlism LN 17 mid/high"),
+        (9.452, 9.589, "Lnlism LN 17 high"),
+    ]
+    RC_intervals_4K = [
+        (1.502, 1.631, "Intro 1 low"),
+        (1.631, 1.760, "Intro 1 mid/low"),
+        (1.760, 1.890, "Intro 1 mid"),
+        (1.890, 2.019, "Intro 1 mid/high"),
+        (2.019, 2.148, "Intro 1 high"),
+        (2.148, 2.278, "Intro 2 low"),
+        (2.278, 2.407, "Intro 2 mid/low"),
+        (2.407, 2.502, "Intro 2 mid"),
+        (2.502, 2.560, "Intro 2 mid/high"),
+        (2.560, 2.619, "Intro 2 high"),
+        (2.619, 2.679, "Intro 3 low"),
+        (2.679, 2.737, "Intro 3 mid/low"),
+        (2.737, 2.821, "Intro 3 mid"),
+        (2.821, 2.929, "Intro 3 mid/high"),
+        (2.929, 3.037, "Intro 3 high"),
+        (3.037, 3.145, "Reform 1 low"),
+        (3.145, 3.253, "Reform 1 mid/low"),
+        (3.253, 3.346, "Reform 1 mid"),
+        (3.346, 3.424, "Reform 1 mid/high"),
+        (3.424, 3.503, "Reform 1 high"),
+        (3.503, 3.581, "Reform 2 low"),
+        (3.581, 3.659, "Reform 2 mid/low"),
+        (3.659, 3.701, "Reform 2 mid"),
+        (3.701, 3.708, "Reform 2 mid/high"),
+        (3.708, 3.714, "Reform 2 high"),
+        (3.714, 3.720, "Reform 3 low"),
+        (3.720, 3.727, "Reform 3 mid/low"),
+        (3.727, 3.810, "Reform 3 mid"),
+        (3.810, 3.970, "Reform 3 mid/high"),
+        (3.970, 4.130, "Reform 3 high"),
+        (4.130, 4.290, "Reform 4 low"),
+        (4.290, 4.450, "Reform 4 mid/low"),
+        (4.450, 4.569, "Reform 4 mid"),
+        (4.569, 4.648, "Reform 4 mid/high"),
+        (4.648, 4.726, "Reform 4 high"),
+        (4.726, 4.804, "Reform 5 low"),
+        (4.804, 4.883, "Reform 5 mid/low"),
+        (4.883, 4.972, "Reform 5 mid"),
+        (4.972, 5.072, "Reform 5 mid/high"),
+        (5.072, 5.173, "Reform 5 high"),
+        (5.173, 5.273, "Reform 6 low"),
+        (5.273, 5.373, "Reform 6 mid/low"),
+        (5.373, 5.441, "Reform 6 mid"),
+        (5.441, 5.476, "Reform 6 mid/high"),
+        (5.476, 5.511, "Reform 6 high"),
+        (5.511, 5.547, "Reform 7 low"),
+        (5.547, 5.582, "Reform 7 mid/low"),
+        (5.582, 5.646, "Reform 7 mid"),
+        (5.646, 5.738, "Reform 7 mid/high"),
+        (5.738, 5.829, "Reform 7 high"),
+        (5.829, 5.921, "Reform 8 low"),
+        (5.921, 6.013, "Reform 8 mid/low"),
+        (6.013, 6.069, "Reform 8 mid"),
+        (6.069, 6.090, "Reform 8 mid/high"),
+        (6.090, 6.110, "Reform 8 high"),
+        (6.110, 6.130, "Reform 9 low"),
+        (6.130, 6.151, "Reform 9 mid/low"),
+        (6.151, 6.205, "Reform 9 mid"),
+        (6.205, 6.294, "Reform 9 mid/high"),
+        (6.294, 6.382, "Reform 9 high"),
+        (6.382, 6.471, "Reform 10 low"),
+        (6.471, 6.560, "Reform 10 mid/low"),
+        (6.560, 6.616, "Reform 10 mid"),
+        (6.616, 6.641, "Reform 10 mid/high"),
+        (6.641, 6.666, "Reform 10 high"),
+        (6.666, 6.691, "Alpha low"),
+        (6.691, 6.716, "Alpha mid/low"),
+        (6.716, 6.773, "Alpha mid"),
+        (6.773, 6.860, "Alpha mid/high"),
+        (6.860, 6.947, "Alpha high"),
+        (6.947, 7.034, "Beta low"),
+        (7.034, 7.121, "Beta mid/low"),
+        (7.121, 7.214, "Beta mid"),
+        (7.214, 7.312, "Beta mid/high"),
+        (7.312, 7.410, "Beta high"),
+        (7.410, 7.509, "Gamma low"),
+        (7.509, 7.607, "Gamma mid/low"),
+        (7.607, 7.705, "Gamma mid"),
+        (7.705, 7.803, "Gamma mid/high"),
+        (7.803, 7.901, "Gamma high"),
+        (7.901, 8.000, "Delta low"),
+        (8.000, 8.098, "Delta mid/low"),
+        (8.098, 8.244, "Delta mid"),
+        (8.244, 8.438, "Delta mid/high"),
+        (8.438, 8.631, "Delta high"),
+        (8.631, 8.825, "Epsilon low"),
+        (8.825, 9.019, "Epsilon mid/low"),
+        (9.019, 9.172, "Epsilon mid"),
+        (9.172, 9.285, "Epsilon mid/high"),
+        (9.285, 9.398, "Epsilon high"),
+        (9.398, 9.511, "Emik Zeta low"),
+        (9.511, 9.624, "Emik Zeta mid/low"),
+        (9.624, 9.742, "Emik Zeta mid"),
+        (9.742, 9.867, "Emik Zeta mid/high"),
+        (9.867, 9.991, "Emik Zeta high"),
+        (9.991, 10.116, "Thaumiel Eta low"),
+        (10.116, 10.241, "Thaumiel Eta mid/low"),
+        (10.241, 10.358, "Thaumiel Eta mid"),
+        (10.358, 10.468, "Thaumiel Eta mid/high"),
+        (10.468, 10.578, "Thaumiel Eta high"),
+        (10.578, 10.689, "CloverWisp Theta low"),
+        (10.689, 10.799, "CloverWisp Theta mid/low"),
+        (10.799, 10.909, "CloverWisp Theta mid"),
+        (10.909, 11.019, "CloverWisp Theta mid/high"),
+        (11.019, 11.129, "CloverWisp Theta high"),
+    ]
+    LN_intervals_6K = [
+        (3.530, 3.718, 'LN 0 low'),
+        (3.718, 3.906, 'LN 0 mid/low'),
+        (3.906, 4.094, 'LN 0 mid'),
+        (4.094, 4.282, 'LN 0 mid/high'),
+        (4.282, 4.470, 'LN 0 high'),
+        (4.470, 4.658, 'LN 1 low'),
+        (4.658, 4.846, 'LN 1 mid/low'),
+        (4.846, 4.974, 'LN 1 mid'),
+        (4.974, 5.042, 'LN 1 mid/high'),
+        (5.042, 5.110, 'LN 1 high'),
+        (5.110, 5.178, 'LN 2 low'),
+        (5.178, 5.246, 'LN 2 mid/low'),
+        (5.246, 5.294, 'LN 2 mid'),
+        (5.294, 5.322, 'LN 2 mid/high'),
+        (5.322, 5.350, 'LN 2 high'),
+        (5.350, 5.378, 'LN 3 low'),
+        (5.378, 5.406, 'LN 3 mid/low'),
+        (5.406, 5.513, 'LN 3 mid'),
+        (5.513, 5.699, 'LN 3 mid/high'),
+        (5.699, 5.885, 'LN 3 high'),
+        (5.885, 6.071, 'LN 4 low'),
+        (6.071, 6.257, 'LN 4 mid/low'),
+        (6.257, 6.347, 'LN 4 mid'),
+        (6.347, 6.341, 'LN 4 mid/high'),
+        (6.341, 6.335, 'LN 4 high'),
+        (6.335, 6.329, 'LN 5 low'),
+        (6.329, 6.323, 'LN 5 mid/low'),
+        (6.323, 6.371, 'LN 5 mid'),
+        (6.371, 6.473, 'LN 5 mid/high'),
+        (6.473, 6.575, 'LN 5 high'),
+        (6.575, 6.677, 'LN 6 low'),
+        (6.677, 6.779, 'LN 6 mid/low'),
+        (6.779, 6.840, 'LN 6 mid'),
+        (6.840, 6.860, 'LN 6 mid/high'),
+        (6.860, 6.880, 'LN 6 high'),
+        (6.880, 6.900, 'LN 7 low'),
+        (6.900, 6.920, 'LN 7 mid/low'),
+        (6.920, 6.973, 'LN 7 mid'),
+        (6.973, 7.059, 'LN 7 mid/high'),
+        (7.059, 7.145, 'LN 7 high'),
+        (7.145, 7.231, 'LN 8 low'),
+        (7.231, 7.317, 'LN 8 mid/low'),
+        (7.317, 7.366, 'LN 8 mid'),
+        (7.366, 7.378, 'LN 8 mid/high'),
+        (7.378, 7.390, 'LN 8 high'),
+        (7.390, 7.402, 'LN 9 low'),
+        (7.402, 7.414, 'LN 9 mid/low'),
+        (7.414, 7.469, 'LN 9 mid'),
+        (7.469, 7.567, 'LN 9 mid/high'),
+        (7.567, 7.665, 'LN 9 high'),
+        (7.665, 7.763, 'LN Terra low'),
+        (7.763, 7.861, 'LN Terra mid/low'),
+        (7.861, 7.952, 'LN Terra mid'),
+        (7.952, 8.036, 'LN Terra mid/high'),
+        (8.036, 8.120, 'LN Terra high'),
+        (8.120, 8.204, 'LN Celestial low'),
+        (8.204, 8.288, 'LN Celestial mid/low'),
+        (8.288, 8.367, 'LN Celestial mid'),
+        (8.367, 8.441, 'LN Celestial mid/high'),
+        (8.441, 8.515, 'LN Celestial high'),
+        (8.515, 8.589, 'LN Mystery low'),
+        (8.589, 8.663, 'LN Mystery mid/low'),
+        (8.663, 8.737, 'LN Mystery mid'),
+        (8.737, 8.811, 'LN Mystery mid/high'),
+        (8.811, 8.885, 'LN Mystery high'),
+        (8.885, 8.959, 'LN Nihility low'),
+        (8.959, 9.033, 'LN Nihility mid/low'),
+        (9.033, 9.112, 'LN Nihility mid'),
+        (9.112, 9.196, 'LN Nihility mid/high'),
+        (9.196, 9.280, 'LN Nihility high'),
+        (9.280, 9.364, 'LN Finish low'),
+        (9.364, 9.448, 'LN Finish mid/low'),
+        (9.448, 9.532, 'LN Finish mid'),
+        (9.532, 9.616, 'LN Finish mid/high'),
+        (9.616, 9.700, 'LN Finish high'),
+    ]
+    RC_intervals_6K = [
+        (3.430, 3.526, 'Regular 0 low'),
+        (3.526, 3.622, 'Regular 0 mid/low'),
+        (3.622, 3.718, 'Regular 0 mid'),
+        (3.718, 3.814, 'Regular 0 mid/high'),
+        (3.814, 3.910, 'Regular 0 high'),
+        (3.910, 4.006, 'Regular 1 low'),
+        (4.006, 4.102, 'Regular 1 mid/low'),
+        (4.102, 4.210, 'Regular 1 mid'),
+        (4.210, 4.330, 'Regular 1 mid/high'),
+        (4.330, 4.450, 'Regular 1 high'),
+        (4.450, 4.570, 'Regular 2 low'),
+        (4.570, 4.690, 'Regular 2 mid/low'),
+        (4.690, 4.831, 'Regular 2 mid'),
+        (4.831, 4.993, 'Regular 2 mid/high'),
+        (4.993, 5.155, 'Regular 2 high'),
+        (5.155, 5.317, 'Regular 3 low'),
+        (5.317, 5.479, 'Regular 3 mid/low'),
+        (5.479, 5.590, 'Regular 3 mid'),
+        (5.590, 5.650, 'Regular 3 mid/high'),
+        (5.650, 5.710, 'Regular 3 high'),
+        (5.710, 5.770, 'Regular 4 low'),
+        (5.770, 5.830, 'Regular 4 mid/low'),
+        (5.830, 5.919, 'Regular 4 mid'),
+        (5.919, 6.037, 'Regular 4 mid/high'),
+        (6.037, 6.155, 'Regular 4 high'),
+        (6.155, 6.273, 'Regular 5 low'),
+        (6.273, 6.391, 'Regular 5 mid/low'),
+        (6.391, 6.490, 'Regular 5 mid'),
+        (6.490, 6.570, 'Regular 5 mid/high'),
+        (6.570, 6.650, 'Regular 5 high'),
+        (6.650, 6.730, 'Regular 6 low'),
+        (6.730, 6.810, 'Regular 6 mid/low'),
+        (6.810, 6.873, 'Regular 6 mid'),
+        (6.873, 6.919, 'Regular 6 mid/high'),
+        (6.919, 6.965, 'Regular 6 high'),
+        (6.965, 7.011, 'Regular 7 low'),
+        (7.011, 7.057, 'Regular 7 mid/low'),
+        (7.057, 7.119, 'Regular 7 mid'),
+        (7.119, 7.197, 'Regular 7 mid/high'),
+        (7.197, 7.275, 'Regular 7 high'),
+        (7.275, 7.353, 'Regular 8 low'),
+        (7.353, 7.431, 'Regular 8 mid/low'),
+        (7.431, 7.503, 'Regular 8 mid'),
+        (7.503, 7.569, 'Regular 8 mid/high'),
+        (7.569, 7.635, 'Regular 8 high'),
+        (7.635, 7.701, 'Regular 9 low'),
+        (7.701, 7.767, 'Regular 9 mid/low'),
+        (7.767, 7.833, 'Regular 9 mid'),
+        (7.833, 7.899, 'Regular 9 mid/high'),
+        (7.899, 7.965, 'Regular 9 high'),
+    ]
+    LN_intervals_7K = [
+        (4.836, 4.9704, 'LN 3 low'), 
+        (4.9704, 5.1048, 'LN 3 mid/low'), 
+        (5.1048, 5.2392, 'LN 3 mid'), 
+        (5.2392, 5.3736, 'LN 3 mid/high'), 
+        (5.3736, 5.508, 'LN 3 high'), 
+        (5.508, 5.5592, 'LN 4 low'), 
+        (5.5592, 5.6104, 'LN 4 mid/low'), 
+        (5.6104, 5.6616, 'LN 4 mid'), 
+        (5.6616, 5.7128, 'LN 4 mid/high'), 
+        (5.7128, 5.764, 'LN 4 high'),
+        (5.764, 5.8824, 'LN 5 low'), 
+        (5.8824, 6.0008, 'LN 5 mid/low'), 
+        (6.0008, 6.1192, 'LN 5 mid'), 
+        (6.1192, 6.2376, 'LN 5 mid/high'),
+        (6.2376, 6.356, 'LN 5 high'), 
+        (6.356, 6.4708, 'LN 6 low'), 
+        (6.4708, 6.5856, 'LN 6 mid/low'),
+        (6.5856, 6.7004, 'LN 6 mid'), 
+        (6.7004, 6.8152, 'LN 6 mid/high'), 
+        (6.8152, 6.93, 'LN 6 high'), 
+        (6.93, 6.9372, 'LN 7 low'), 
+        (6.9372, 6.9444, 'LN 7 mid/low'), 
+        (6.9444, 6.9516, 'LN 7 mid'), 
+        (6.9516, 6.9588, 'LN 7 mid/high'), 
+        (6.9588, 7.053, 'LN 7 high'), 
+        (7.053, 7.1472, 'LN 8 low'), 
+        (7.1472, 7.2414, 'LN 8 mid/low'), 
+        (7.2414, 7.3356, 'LN 8 mid'), 
+        (7.3356, 7.4298, 'LN 8 mid/high'), 
+        (7.4298, 7.4872, 'LN 8 high'), 
+        (7.4872, 7.5446, 'LN 9 low'), 
+        (7.5446, 7.602, 'LN 9 mid/low'), 
+        (7.602, 7.6594, 'LN 9 mid'), 
+        (7.6594, 7.7168, 'LN 9 mid/high'), 
+        (7.7168, 7.8572, 'LN 9 high'), 
+        (7.8572, 7.9976, 'LN 10 low'), 
+        (7.9976, 8.138, 'LN 10 mid/low'), 
+        (8.138, 8.2784, 'LN 10 mid'), 
+        (8.2784, 8.4188, 'LN 10 mid/high'), 
+        (8.4188, 8.4938, 'LN 10 high'), 
+        (8.4938, 8.5688, 'LN Gamma low'),
+        (8.5688, 8.6438, 'LN Gamma mid/low'), 
+        (8.6438, 8.7188, 'LN Gamma mid'), 
+        (8.7188, 8.7938, 'LN Gamma mid/high'),
+        (8.7938, 8.8878, 'LN Gamma high'), 
+        (8.8878, 8.9818, 'LN Azimuth low'), 
+        (8.9818, 9.0758, 'LN Azimuth mid/low'),
+        (9.0758, 9.1698, 'LN Azimuth mid'),
+        (9.1698, 9.2638, 'LN Azimuth mid/high'),
+        (9.2638, 9.3784, 'LN Azimuth high'), 
+        (9.3784, 9.493, 'LN Zenith low'), 
+        (9.493, 9.6076, 'LN Zenith mid/low'), 
+        (9.6076, 9.7222, 'LN Zenith mid'),
+        (9.7222, 9.8368, 'LN Zenith mid/high'),
+        (9.8368, 9.975, 'LN Zenith high'), 
+        (9.975, 10.1132, 'LN Stellium low'), 
+        (10.1132, 10.2514, 'LN Stellium mid/low'),
+        (10.2514, 10.3896, 'LN Stellium mid'), 
+        (10.3896, 10.5278, 'LN Stellium mid/high'), 
+        (10.5278, 10.666, 'LN Stellium high')
+        ]
+    RC_intervals_7K = [
+        (3.5085, 3.6631, 'Regular 0 low'), 
+        (3.6631, 3.8177, 'Regular 0 mid/low'), 
+        (3.8177, 3.9723, 'Regular 0 mid'), 
+        (3.9723, 4.1269, 'Regular 0 mid/high'), 
+        (4.1269, 4.2815, 'Regular 0 high'), 
+        (4.2815, 4.4361, 'Regular 1 low'), 
+        (4.4361, 4.5907, 'Regular 1 mid/low'), 
+        (4.5907, 4.7202, 'Regular 1 mid'), 
+        (4.7202, 4.8246, 'Regular 1 mid/high'), 
+        (4.8246, 4.929, 'Regular 1 high'), 
+        (4.929, 5.0334, 'Regular 2 low'), 
+        (5.0334, 5.1378, 'Regular 2 mid/low'), 
+        (5.1378, 5.2379, 'Regular 2 mid'), 
+        (5.2379, 5.3337, 'Regular 2 mid/high'), 
+        (5.3337, 5.4295, 'Regular 2 high'), 
+        (5.4295, 5.5253, 'Regular 3 low'), 
+        (5.5253, 5.6211, 'Regular 3 mid/low'), 
+        (5.6211, 5.6927, 'Regular 3 mid'), 
+        (5.6927, 5.7401, 'Regular 3 mid/high'), 
+        (5.7401, 5.7875, 'Regular 3 high'), 
+        (5.7875, 5.8349, 'Regular 4 low'), 
+        (5.8349, 5.8823, 'Regular 4 mid/low'), 
+        (5.8823, 5.9313, 'Regular 4 mid'), 
+        (5.9313, 5.9819, 'Regular 4 mid/high'), 
+        (5.9819, 6.0325, 'Regular 4 high'), 
+        (6.0325, 6.0831, 'Regular 5 low'), 
+        (6.0831, 6.1337, 'Regular 5 mid/low'), 
+        (6.1337, 6.2176, 'Regular 5 mid'), 
+        (6.2176, 6.3348, 'Regular 5 mid/high'), 
+        (6.3348, 6.452, 'Regular 5 high'), 
+        (6.452, 6.5692, 'Regular 6 low'), 
+        (6.5692, 6.6864, 'Regular 6 mid/low'), 
+        (6.6864, 6.7772, 'Regular 6 mid'), 
+        (6.7772, 6.8416, 'Regular 6 mid/high'), 
+        (6.8416, 6.906, 'Regular 6 high'), 
+        (6.906, 6.9704, 'Regular 7 low'), 
+        (6.9704, 7.0348, 'Regular 7 mid/low'), 
+        (7.0348, 7.1085, 'Regular 7 mid'), 
+        (7.1085, 7.1915, 'Regular 7 mid/high'), 
+        (7.1915, 7.2745, 'Regular 7 high'), 
+        (7.2745, 7.3575, 'Regular 8 low'), 
+        (7.3575, 7.4405, 'Regular 8 mid/low'), 
+        (7.4405, 7.5096, 'Regular 8 mid'), 
+        (7.5096, 7.5648, 'Regular 8 mid/high'), 
+        (7.5648, 7.62, 'Regular 8 high'), 
+        (7.62, 7.6752, 'Regular 9 low'), 
+        (7.6752, 7.7304, 'Regular 9 mid/low'), 
+        (7.7304, 7.8134, 'Regular 9 mid'), 
+        (7.8134, 7.9242, 'Regular 9 mid/high'), 
+        (7.9242, 8.035, 'Regular 9 high'),
+        (8.035, 8.1458, 'Regular 10 low'), 
+        (8.1458, 8.2566, 'Regular 10 mid/low'), 
+        (8.2566, 8.357, 'Regular 10 mid'), 
+        (8.357, 8.447, 'Regular 10 mid/high'),
+        (8.447, 8.537, 'Regular 10 high'), 
+        (8.537, 8.627, 'Regular Gamma low'), 
+        (8.627, 8.717, 'Regular Gamma mid/low'),
+        (8.717, 8.8079, 'Regular Gamma mid'),
+        (8.8079, 8.8997, 'Regular Gamma mid/high'),
+        (8.8997, 8.9915, 'Regular Gamma high'), 
+        (8.9915, 9.0833, 'Regular Azimuth low'), 
+        (9.0833, 9.1751, 'Regular Azimuth mid/low'),
+        (9.1751, 9.2921, 'Regular Azimuth mid'), 
+        (9.2921, 9.4343, 'Regular Azimuth mid/high'),
+        (9.4343, 9.5765, 'Regular Azimuth high'), 
+        (9.5765, 9.7187, 'Regular Zenith low'), 
+        (9.7187, 9.8609, 'Regular Zenith mid/low'), 
+        (9.8609, 9.9728, 'Regular Zenith mid'),
+        (9.9728, 10.0544, 'Regular Zenith mid/high'),
+        (10.0544, 10.136, 'Regular Zenith high'), 
+        (10.136, 10.2176, 'Regular Stellium low'),
+        (10.2176, 10.2992, 'Regular Stellium mid/low'), 
+        (10.2992, 10.3808, 'Regular Stellium mid'), 
+        (10.3808, 10.4624, 'Regular Stellium mid/high'), 
+        (10.4624, 10.544, 'Regular Stellium high')
+    ]
+    
+# ==========辅助函数==========
+
+def _build_acc_help_page() -> None:
+    """使用本地段位数据刷新 /omtk acc 第3页，避免循环导入。"""
+    dan_list_text = "全部内置段位列表:\n" + format_dan_list_grouped(sorted(dan_data.dan_notes.keys()))
+    for index, item in enumerate(omtk_help_data.help_text):
+        cmd, cmd_name, page, total_pages, _ = item
+        if cmd == "acc" and page == "3" and total_pages == "3":
+            omtk_help_data.help_text[index] = (cmd, cmd_name, page, total_pages, dan_list_text)
+            break
+
+
+_build_acc_help_page()
