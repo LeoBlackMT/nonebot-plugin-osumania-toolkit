@@ -708,7 +708,7 @@ def _hitmechanics_etterna(
         note = notes[idx]
         if note.time_ms > window_end:
             break
-        if note.status == HIT_REQUIRED and note.time_ms >= window_start:
+        if note.status == HIT_REQUIRED:
             delta = now - note.time_ms
             if best is None or abs(delta) < abs(best[1]) or (abs(delta) == abs(best[1]) and idx < best[0]):
                 best = (idx, delta)
@@ -775,10 +775,12 @@ def _expire_notes(
             if note.status == HIT_REQUIRED:
                 note.status = MISS
                 note.hold_state = "MissedHead" if note.note_kind == NOTE_HOLD_HEAD else None
+                # Interlude: MISS event time = note_time + late_window (note timeout time)
+                miss_time = note.time_ms + late_note_window
                 matched_events.append(
                     _build_event_dict(
                         index=note.index,
-                        time_ms=note.time_ms,
+                        time_ms=miss_time,
                         column=note.column,
                         action="MISS",
                         note_kind=note.note_kind,
@@ -800,10 +802,11 @@ def _expire_notes(
                     if tail.status == RELEASE_REQUIRED:
                         tail.status = MISS
                         tail.hold_state = "MissedHead"
+                        tail_miss_time = tail.time_ms + late_note_window
                         matched_events.append(
                             _build_event_dict(
                                 index=tail.index,
-                                time_ms=tail.time_ms,
+                                time_ms=tail_miss_time,
                                 column=tail.column,
                                 action="MISS",
                                 note_kind=tail.note_kind,
@@ -835,10 +838,11 @@ def _expire_notes(
             if tail.status == RELEASE_REQUIRED:
                 tail.status = DROP_HOLD
                 tail.hold_state = "Dropped"
+                drop_time = tail.time_ms + late_release_window
                 matched_events.append(
                     _build_event_dict(
                         index=tail.index,
-                        time_ms=tail.time_ms,
+                        time_ms=drop_time,
                         column=tail.column,
                         action="DROP_HOLD",
                         note_kind=tail.note_kind,

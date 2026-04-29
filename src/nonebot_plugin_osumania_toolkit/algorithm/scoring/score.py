@@ -792,13 +792,24 @@ def get_score_result(
 
             if hold_variant == "OnlyRequireHold":
                 threshold = _to_float(hold_payload, 0.0)
-                hold_ok = False
+                release_dropped = tail_note is None or _note_has_action(tail_note, "DROP_HOLD")
+                release_overheld = False
+                release_missed = False
                 if tail_note is not None and _is_number(tail_note.get("tail_delta")):
-                    hold_ok = abs(_to_float(tail_note.get("tail_delta"), 0.0)) <= threshold
-                    if _note_has_action(tail_note, "DROP_HOLD"):
-                        hold_ok = False
+                    tail_delta = _to_float(tail_note.get("tail_delta"), 0.0)
+                    if abs(tail_delta) > threshold:
+                        release_missed = True
+                        release_overheld = tail_delta > threshold
+                    if release_dropped:
+                        release_missed = True
+                elif tail_note is None:
+                    release_missed = True
 
-                final_j = head_j if hold_ok and idx not in unmatched_note_indices else miss_index
+                hold_ok = not release_dropped and not release_missed and not release_overheld
+                if idx in unmatched_note_indices:
+                    hold_ok = False
+
+                final_j = head_j if hold_ok else miss_index
                 note["final_judgement_index"] = _safe_judgement_index(final_j, judgement_len, miss_index)
                 _score(
                     idx,
@@ -807,10 +818,29 @@ def get_score_result(
                     abs(_to_float(note.get("head_delta"), 0.0)) if _is_number(note.get("head_delta")) else None,
                     "hold_only_require",
                 )
+
+                # OnlyRequireHold release combo: per Interlude,
+                #   (not overheld) && (missed || dropped) → Break true
+                #   otherwise → Increase
+                if release_overheld:
+                    combo_action = "increase"
+                elif release_missed or release_dropped:
+                    combo_action = "break"
+                else:
+                    combo_action = "increase"
+
+                if tail_note is not None:
+                    release_time = _to_float(tail_note.get("note_time"), note_time) if tail_note is not None else note_time
+                    scoring_objects.append({
+                        "time": release_time,
+                        "judgement_index": -1,
+                        "points": 0.0,
+                        "source": "combo_release",
+                        "combo_action": combo_action,
+                    })
+
                 if tail_note is not None and tail_note.get("final_judgement_index") is None:
-                    tail_note["final_judgement_index"] = (
-                        miss_index if not hold_ok else _safe_judgement_index(tail_note.get("tail_judgement", miss_index), judgement_len, miss_index)
-                    )
+                    tail_note["final_judgement_index"] = miss_index
                 continue
 
             if hold_variant == "JudgeReleasesSeparately":
@@ -984,8 +1014,19 @@ def get_score_result(
         combo_breaks = 0
 
         for obj in scoring_objects:
+            source = str(obj.get("source", ""))
             j_idx = _safe_judgement_index(obj.get("judgement_index"), judgement_len, miss_index)
             points = _to_float(obj.get("points", 0.0), 0.0)
+
+            if source == "combo_release":
+                # Combo-only event: no points, no judgement count
+                if obj.get("combo_action") == "break":
+                    combo = 0
+                    combo_breaks += 1
+                else:
+                    combo += 1
+                    best_combo = max(best_combo, combo)
+                continue
 
             judgement_counts[j_idx] += 1
             points_sum += points
