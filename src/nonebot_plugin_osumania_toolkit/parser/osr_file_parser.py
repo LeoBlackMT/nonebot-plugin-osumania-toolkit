@@ -513,17 +513,13 @@ class osr_file:
         self.press_times_real = [int(round(t)) for t in self.press_times_real_float]
         self.press_events_real = [(col, int(round(t))) for col, t in self.press_events_real_float]
 
-        # chart 时间线
-        self.press_times_chart_float = [float(t * self.corrector) for t in self.press_times_real_float]
-        self.press_events_chart_float = [
-            (col, float(t * self.corrector)) for col, t in self.press_events_real_float
-        ]
-        self.press_times_chart = [int(round(t)) for t in self.press_times_chart_float]
-        self.press_events_chart = [(col, int(round(t))) for col, t in self.press_events_chart_float]
+        # chart 时间线 — OSR replay frames are already in chart time
+        self.press_times_chart_float = list(self.press_times_real_float)
+        self.press_events_chart_float = list(self.press_events_real_float)
+        self.press_times_chart = list(self.press_times_real)
+        self.press_events_chart = list(self.press_events_real)
 
-        self.replay_data_chart = [
-            (float(t * self.corrector), mask) for t, mask in self.replay_data_real
-        ]
+        self.replay_data_chart = list(self.replay_data_real)
 
         # 旧字段兼容：默认保持 chart 时间作为匹配时间线
         self.press_times_float = list(self.press_times_chart_float)

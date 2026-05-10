@@ -12,6 +12,7 @@
 <a href="https://pypi.python.org/pypi/nonebot-plugin-osumania-toolkit">
     <img src="https://img.shields.io/pypi/v/nonebot-plugin-osumania-toolkit.svg" alt="pypi">
 </a>
+<a href="https://www.codefactor.io/repository/github/leoblackmt/nonebot-plugin-osumania-toolkit/overview/main"><img src="https://www.codefactor.io/repository/github/leoblackmt/nonebot-plugin-osumania-toolkit/badge/main" alt="CodeFactor" /></a>
 <img src="https://img.shields.io/badge/python-3.10--3.12-blue.svg" alt="python">
 <hr/>
 </div>

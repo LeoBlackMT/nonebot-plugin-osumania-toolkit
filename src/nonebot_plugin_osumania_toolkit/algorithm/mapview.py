@@ -278,23 +278,24 @@ def format_mapview_result_text(row: dict[str, Any]) -> str:
     """纯文字兜底：将 mapview 分析结果格式化为可读文本。"""
     t = row.get("template", {})
     lines = [
-        f"Mapview 分析: {t.get('status_text', 'Unknown')}",
+        f"谱面信息: {t.get('status_text', 'Unknown')}",
     ]
     meta = t.get("rework_meta_lines", []) or []
     lines.extend(meta)
-    diff_top, diff_bottom = t.get("diff_top", "-"), t.get("diff_bottom")
+    diff_top = t.get("rework_diff_top", "-")
+    diff_bottom = t.get("rework_diff_bottom")
     if diff_bottom:
-        lines.append(f"难度: {diff_top} || {diff_bottom}")
+        lines.append(f"估计难度: {diff_top} || {diff_bottom}")
     else:
-        lines.append(f"难度: {diff_top}")
-    clusters = t.get("cluster_rows", []) or []
+        lines.append(f"估计难度: {diff_top}")
+    clusters = t.get("clusters", []) or []
     if clusters:
         parts = []
         for c in clusters:
             label = c.get("label", "-")
             subtype = c.get("subtype", "")
             parts.append(f"{label}{' (' + subtype + ')' if subtype else ''}")
-        lines.append(f"键型: {', '.join(parts)}")
+        lines.append(f"主要键型: {', '.join(parts)}")
     return "\n".join(lines)
 
 

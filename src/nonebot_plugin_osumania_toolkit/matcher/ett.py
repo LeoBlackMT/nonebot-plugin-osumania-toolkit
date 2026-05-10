@@ -128,6 +128,8 @@ async def handle_ett(bot: Bot, event: MessageEvent):
             try:
                 image_bytes = await render_ett_card(TEMPLATE_DIR, row["template"])
                 await ett.finish(MessageSegment.image(image_bytes))
+            except FinishedException:
+                raise
             except Exception:
                 await ett.finish(format_ett_result_text(row))
         else:

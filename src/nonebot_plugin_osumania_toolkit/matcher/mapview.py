@@ -108,6 +108,8 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                 try:
                     image_bytes = await render_analysis_card(TEMPLATE_DIR, row["template"])
                     await mapview.finish(MessageSegment.image(image_bytes))
+                except FinishedException:
+                    raise
                 except Exception:
                     await mapview.finish(format_mapview_result_text(row))
 
@@ -127,6 +129,8 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
             try:
                 image_bytes = await render_analysis_card(TEMPLATE_DIR, row["template"])
                 await mapview.finish(MessageSegment.image(image_bytes))
+            except FinishedException:
+                raise
             except Exception:
                 await mapview.finish(format_mapview_result_text(row))
         else:

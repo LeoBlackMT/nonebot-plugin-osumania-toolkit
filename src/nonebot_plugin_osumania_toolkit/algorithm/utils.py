@@ -211,7 +211,7 @@ def parse_cmd(cmd_text: str):
             continue
 
         # 倍速处理
-        if part.lower().startswith("x") or part.startswith("*"):
+        if part.lower().startswith("x") or part.startswith("*") or part.lower().startswith("×"):
             try:
                 value = float(part[1:])
                 if 0.25 <= round(value, 3) <= 3.0:
