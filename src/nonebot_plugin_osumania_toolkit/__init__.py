@@ -20,7 +20,7 @@ __plugin_meta__ = PluginMetadata(
     supported_adapters={"~onebot.v11"}
 )
 
-_VERSION = "1.1.1"
+_VERSION = "1.1.2"
 
 config = get_plugin_config(Config)
 driver = get_driver()
