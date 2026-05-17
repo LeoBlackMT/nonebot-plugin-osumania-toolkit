@@ -13,7 +13,7 @@ from ..conversion import convert_mc_to_osu
 from ..pattern import analyze_pattern_file
 from ..utils import extract_zip_file, is_mc_file, resolve_meta_data
 from .calc import OfficialRunnerError, compute_difficulties
-from ...data import sr_color
+from ...data.color import sr_color
 
 color = sr_color()
 DEFAULT_SCORE_GOAL = 0.93

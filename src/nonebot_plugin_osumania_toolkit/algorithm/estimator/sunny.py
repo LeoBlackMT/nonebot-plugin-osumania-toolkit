@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..rework.xxy_algorithm import calculate as calculate_sunny
-from ...data import sr_intervals_data
+from ...data.intervals import sr_intervals_data
 from .exceptions import NotManiaError, ParseError
 from .shared import resolve_chart_path
 

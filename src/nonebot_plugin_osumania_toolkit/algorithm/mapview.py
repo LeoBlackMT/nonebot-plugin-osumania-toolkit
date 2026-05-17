@@ -14,7 +14,7 @@ from .pattern import PatternNotManiaError, PatternParseError, analyze_pattern_fi
 from .estimator.exceptions import ParseError, NotManiaError
 from .rework.rework import get_rework_result
 from .utils import extract_zip_file, is_mc_file, resolve_meta_data
-from ..data import sr_color
+from ..data.color import sr_color
 
 color = sr_color()
 

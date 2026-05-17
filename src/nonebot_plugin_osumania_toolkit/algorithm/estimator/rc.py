@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Any
-from ...data import estimator_data
+from ...data.estimator import estimator_data
 
 GREEK_BY_INDEX = estimator_data.GREEK_BY_INDEX
 RC_TIER_CANDIDATES = estimator_data.RC_TIER_CANDIDATES

@@ -9,7 +9,7 @@ from collections import Counter
 from typing import Optional
 from nonebot.log import logger
 
-from ..data import file_parser_data
+from ..data.parser import file_parser_data
 
 # 参考实现路径：
 # - prelude/src/Gameplay/Replays/ReplayFormat.fs

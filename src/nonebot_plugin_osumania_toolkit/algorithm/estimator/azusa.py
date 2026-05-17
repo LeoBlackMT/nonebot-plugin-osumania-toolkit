@@ -9,7 +9,7 @@ from .rc import estimate_sunny_numeric as _rc_estimate_sunny_numeric
 from .rc import numeric_to_rc_label
 from .shared import load_osu_chart
 from .sunny import estimate_sunny_result
-from ...data import estimator_data
+from ...data.estimator import estimator_data
 
 # ============================================================
 # Constants (exact match with JS AZUSA_CONFIG and calibration data)

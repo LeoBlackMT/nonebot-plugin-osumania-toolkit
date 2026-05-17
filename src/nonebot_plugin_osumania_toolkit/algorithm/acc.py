@@ -4,7 +4,7 @@ from typing import Tuple, List
 from pathlib import Path
 
 from ..parser.osu_file_parser import osu_file
-from ..data import dan_data
+from ..data.dan import dan_data
 from .utils import parse_bid_or_url
 
 # ==================== 计算函数 ====================
