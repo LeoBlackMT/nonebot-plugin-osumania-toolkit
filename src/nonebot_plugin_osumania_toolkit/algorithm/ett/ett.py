@@ -6,7 +6,7 @@ import shutil
 import time
 from pathlib import Path
 from typing import Any
-
+from nonebot import get_plugin_config
 
 from ...parser.osu_file_parser import osu_file
 from ..conversion import convert_mc_to_osu
@@ -14,7 +14,9 @@ from ..pattern import analyze_pattern_file
 from ..utils import extract_zip_file, is_mc_file, resolve_meta_data
 from .calc import OfficialRunnerError, compute_difficulties
 from ...data.color import sr_color
+from ...config import Config
 
+config = get_plugin_config(Config)
 color = sr_color()
 DEFAULT_SCORE_GOAL = 0.93
 MAX_SKILL_VALUE = 41.0
@@ -199,7 +201,7 @@ async def analyze_ett_zip(
     mod_display: str,
     cache_dir: Path,
     score_goal: float = DEFAULT_SCORE_GOAL,
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str], int]:
     temp_dir = cache_dir / f"ett_batch_{int(time.time())}_{os.getpid()}"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -211,11 +213,17 @@ async def analyze_ett_zip(
             chart_files = await asyncio.to_thread(extract_zip_file, zip_file, temp_dir)
         except Exception as e:
             errors.append(f"图包分析失败 - {e}")
-            return results, errors
+            return results, errors, 0
 
         if not chart_files:
             errors.append("图包中没有可分析的谱面文件。")
-            return results, errors
+            return results, errors, 0
+
+        total = len(chart_files)
+        
+        max_charts = config.batch_max_charts
+        if max_charts > 0 and total > max_charts:
+            chart_files = chart_files[:max_charts]
 
         for chart_file in chart_files:
             try:
@@ -229,6 +237,7 @@ async def analyze_ett_zip(
                     score_goal,
                 )
                 results.append(row)
+                await asyncio.sleep(0)
             except ETTParseError:
                 errors.append(f"{chart_file.name}: 谱面解析失败")
             except ETTNotManiaError:
@@ -240,7 +249,7 @@ async def analyze_ett_zip(
             except Exception as e:
                 errors.append(f"{chart_file.name}: 分析失败 - {e}")
 
-        return results, errors
+        return results, errors, total
     finally:
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)

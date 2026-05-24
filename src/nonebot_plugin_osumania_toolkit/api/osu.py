@@ -8,7 +8,7 @@ from urllib.parse import unquote
 from ..config import Config
 config = get_plugin_config(Config)
 
-MAX_FILE_SIZE = config.max_file_size_mb * 1024 * 1024
+MAX_FILE_SIZE = config.max_file_size_mb * 1024 * 1024 if config.max_file_size_mb > 0 else 9999999999
 
 async def download_file_by_id(cache_dir: Path, map_id: int) -> tuple[Path, str]:
     url = f"https://osu.ppy.sh/osu/{map_id}"

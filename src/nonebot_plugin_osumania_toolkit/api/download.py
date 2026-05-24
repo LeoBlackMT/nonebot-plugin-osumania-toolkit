@@ -15,7 +15,7 @@ from ..file.cleanup import cleanup_temp_file, _is_safe_cleanup_target
 config = get_plugin_config(Config)
 
 # 文件大小限制
-MAX_FILE_SIZE = config.max_file_size_mb * 1024 * 1024  # 根据配置设置
+MAX_FILE_SIZE = config.max_file_size_mb * 1024 * 1024 if config.max_file_size_mb > 0 else 9999999999  # 根据配置设置
 
 async def get_file_url(bot: Bot, file_seg: MessageSegment) -> Optional[Tuple[str, str]]:
     """

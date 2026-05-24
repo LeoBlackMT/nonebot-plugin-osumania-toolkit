@@ -100,7 +100,8 @@
 | omtk_cache_max_age | 否 | int | 24 | 缓存文件最大保留时间（小时） |
 | default_convert_od | 否 | int | 8 | .mc转.osu的默认OverallDifficulty值 |
 | default_convert_hp | 否 | int | 8 | .mc转.osu的默认HPDrainRate值 |
-| max_file_size_mb | 否 | int | 50 | 允许处理的最大文件大小（MB） |
+| max_file_size_mb | 否 | int | 50 | 允许处理的最大文件大小（MB），设置为0时无限制 |
+| batch_max_charts | 否 | int | 15 | 图包批量分析单次最多处理谱面数，设置为0时无限制 |
 
 注: 其他内容的相关配置项过多，这里只列出基础配置部分。如有修改需要请查看[配置文件](https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/blob/main/src/nonebot_plugin_osumania_toolkit/config.py)中的注释。
 

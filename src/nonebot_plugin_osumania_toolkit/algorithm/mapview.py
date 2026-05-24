@@ -4,6 +4,7 @@ import time
 import asyncio
 from pathlib import Path
 from typing import Any
+from nonebot import get_plugin_config
 
 from .conversion import convert_mc_to_osu
 from .estimator.companella import estimate_companella_result
@@ -15,7 +16,9 @@ from .estimator.exceptions import ParseError, NotManiaError
 from .rework.rework import get_rework_result
 from .utils import extract_zip_file, is_mc_file, resolve_meta_data
 from ..data.color import sr_color
+from ..config import Config
 
+config = get_plugin_config(Config)
 color = sr_color()
 
 STAR_BG_STOPS = sr_color.STAR_BG_STOPS
@@ -242,11 +245,19 @@ async def analyze_mapview_zip(
             chart_files = await asyncio.to_thread(extract_zip_file, zip_file, temp_dir)
         except Exception as e:
             errors.append(f"图包分析失败 - {e}")
-            return results, errors
+            return results, errors, []
 
         if not chart_files:
             errors.append("图包中没有可分析的谱面文件。")
-            return results, errors
+            return results, errors, []
+        total = len(chart_files)
+        # 限制单次处理谱面数量，避免长时间阻塞
+        max_charts = config.batch_max_charts if config.batch_max_charts > 0 else len(chart_files)
+        if len(chart_files) > max_charts:
+            errors.append(
+                f"图包包含 {len(chart_files)} 个谱面，超过单次处理谱面数量 {max_charts} 个。"
+            )
+            chart_files = chart_files[:max_charts]
 
         for chart_file in chart_files:
             try:
@@ -260,6 +271,8 @@ async def analyze_mapview_zip(
                     cache_dir,
                 )
                 results.append(row)
+                # 每个谱面之间短暂让出控制权，避免长时间阻塞事件循环
+                await asyncio.sleep(0)
             except (ParseError, PatternParseError) as e:
                 detail = _format_parse_error_detail(e)
                 errors.append(f"{chart_file.name}: 谱面解析失败 - {detail}")
@@ -268,7 +281,7 @@ async def analyze_mapview_zip(
             except Exception as e:
                 errors.append(f"{chart_file.name}: 分析失败 - {e}")
 
-        return results, errors
+        return results, errors, total
     finally:
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)

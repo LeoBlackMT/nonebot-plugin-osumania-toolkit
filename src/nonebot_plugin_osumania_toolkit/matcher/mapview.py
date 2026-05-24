@@ -1,3 +1,4 @@
+import asyncio
 import os
 from pathlib import Path
 
@@ -66,13 +67,23 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                 )
 
             if file_name.lower().endswith((".osz", ".mcz")):
-                await mapview.send(f"已收到图包：{file_name}，正在生成图片，请稍候...")
-                rows, errors = await analyze_mapview_zip(
+                await mapview.send(f"已收到图包：{file_name}，正在分析，请稍候...")
+                rows, errors, total = await analyze_mapview_zip(
                     tmp_file, speed_rate, od_flag, cvt_flag, mod_display, CACHE_DIR
                 )
 
+                if not rows and not errors:
+                    await mapview.finish("图包中没有可分析的谱面文件。")
+                if not rows:
+                    await mapview.finish("错误:\n" + "\n".join(errors))
+
+                avalible = len(rows)
+                if total >= 3:
+                    await mapview.send(f"分析完成，有效 {avalible} / {total}，正在生成图片...")
+
                 nodes: list[Message | str] = []
-                for row in rows:
+                batch_size = 5
+                for idx, row in enumerate(rows):
                     try:
                         image_bytes = await render_analysis_card(TEMPLATE_DIR, row["template"])
                         nodes.append(
@@ -83,14 +94,17 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                             f"{row['file_name']}:\n{format_mapview_result_text(row)}"
                         )
 
+                    if len(nodes) >= batch_size or idx == avalible - 1:
+                        await send_forward_text_messages(bot, event, nodes)
+                        nodes = []
+                        
+                    await asyncio.sleep(0.5)  # 避免发送过快导致消息被合并或丢失
+
                 if errors:
-                    for err in errors:
-                        nodes.append(err)
+                    await send_forward_text_messages(
+                        bot, event, ["部分谱面分析失败:\n" + "\n".join(errors)]
+                    )
 
-                if not nodes:
-                    nodes = ["图包中没有可分析的谱面文件。"]
-
-                await send_forward_text_messages(bot, event, nodes)
                 await mapview.finish()
 
             else:

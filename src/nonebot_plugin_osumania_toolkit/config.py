@@ -9,14 +9,18 @@ class Config(BaseModel):
     # 缓存文件最大保留时间（小时），默认 24 小时
     omtk_cache_max_age: int = 24
     
-    # 允许的最大谱面文件大小（MB），默认 50 MB
+    # 允许的最大谱面文件大小（MB），默认 50 MB，设置为 0 时表示无限制。
     max_file_size_mb: int = 50
+    
+    # 图包批量分析单次最多处理谱面数，默认 15 个，设置为 0 时表示无限制。
+    batch_max_charts: int = 15
     
     # .mc 转 .osu 的默认 OverallDifficulty 和 HPDrainRate
     default_convert_od: int = 8
     default_convert_hp: int = 8
     
-    # 注意：下方所有配置内容为高级参数，修改前请务必了解其作用和影响，如果你是普通用户，建议保持默认值不变。
+    # !注意!：下方所有配置内容为高级参数，修改前请务必了解其作用和影响，如果你是普通用户，建议保持默认值不变。
+    
     # =========== 分析常数 ===========
     
     # 按压分析基础阈值

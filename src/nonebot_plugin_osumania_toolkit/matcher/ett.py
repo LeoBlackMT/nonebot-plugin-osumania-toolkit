@@ -1,3 +1,4 @@
+import asyncio
 import os
 from pathlib import Path
 
@@ -69,13 +70,22 @@ async def handle_ett(bot: Bot, event: MessageEvent):
                 )
 
             if file_name.lower().endswith((".osz", ".mcz")):
-                await ett.send(f"已收到图包：{file_name}，正在生成图片，请稍候...")
-                rows, errors = await analyze_ett_zip(
+                await ett.send(f"已收到图包：{file_name}，正在分析，请稍候...")
+                rows, errors, total = await analyze_ett_zip(
                     tmp_file, speed_rate, cvt_flag, mod_display, CACHE_DIR
                 )
 
+                if not rows and not errors:
+                    await ett.finish("图包中没有可分析的谱面文件。")
+                if not rows:
+                    await ett.finish("错误:\n" + "\n".join(errors))
+
+                if total >= 3:
+                    await ett.send(f"分析完成，有效 {len(rows)} / {total}，正在生成图片...")
+
                 nodes: list[Message | str] = []
-                for row in rows:
+                batch_size = 5
+                for idx, row in enumerate(rows):
                     try:
                         image_bytes = await render_ett_card(TEMPLATE_DIR, row["template"])
                         nodes.append(
@@ -86,14 +96,16 @@ async def handle_ett(bot: Bot, event: MessageEvent):
                             f"{row['file_name']}:\n{format_ett_result_text(row)}"
                         )
 
+                    if len(nodes) >= batch_size or idx == len(rows) - 1:
+                        await send_forward_text_messages(bot, event, nodes)
+                        nodes = []
+                        await asyncio.sleep(0.5)
+
                 if errors:
-                    for err in errors:
-                        nodes.append(err)
+                    await send_forward_text_messages(
+                        bot, event, ["部分谱面分析失败:\n" + "\n".join(errors)]
+                    )
 
-                if not nodes:
-                    nodes = ["图包中没有可分析的谱面文件。"]
-
-                await send_forward_text_messages(bot, event, nodes)
                 await ett.finish()
 
             else:

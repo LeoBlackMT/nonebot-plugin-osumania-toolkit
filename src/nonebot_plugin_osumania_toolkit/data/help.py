@@ -1,5 +1,9 @@
+from nonebot import get_plugin_config
 from .utils import _build_cvtscore_ruleset_listing_text, format_dan_list_grouped
 from .dan import dan_data
+from ..config import Config
+
+config = get_plugin_config(Config)
 
 # 帮助文本数据
 class omtk_help_data:
@@ -29,7 +33,7 @@ class omtk_help_data:
             "你可以使用/pressingtime (/按压) 命令的同时回复一个 .osr/.mr 文件以分析其按压时长分布图。"),
             
             ("analyze", "作弊分析", "1", "3",
-            "*警告* 该命令开销较大，请勿滥用。\n-注意- 作弊分析由算法生成，仅供参考，仍处于早期实验阶段，如有问题请反馈。\n/analyze (/分析) 命令基于回放和谱面做多维度检测（时域、频谱、delta_t）。发送命令的同时回复 .osr/.mr 触发分析；指定 bid (或输入网址)会直接分析 delta_t；未指定 bid 时可继续发送 .osu/.mc 或输入 1 执行无谱面分析。\n命令格式：/analyze [-reason] [b<bid>]\n示例：/analyze b4094064\n参数 -reason：在未检测到作弊时仍输出分析详情。作弊/可疑时始终输出。"),
+            "*警告* 该命令开销较大，请勿滥用。\n-注意- 作弊分析由算法生成，仅供参考，如有问题请反馈。\n/analyze (/分析) 命令基于回放和谱面做多维度检测（时域、频谱、delta_t）。发送命令的同时回复 .osr/.mr 触发分析；指定 bid (或输入网址)会直接分析 delta_t；未指定 bid 时可继续发送 .osu/.mc 或输入 1 执行无谱面分析。\n命令格式：/analyze [-reason] [b<bid>]\n示例：/analyze b4094064\n参数 -reason：在未检测到作弊时仍输出分析详情。作弊/可疑时始终输出。"),
             
             ("analyze", "作弊分析", "2", "3",
             "分析结果图片说明：\n当提供谱面时，将生成四格图：\n1. 按压时长分布图（左上）：各轨道的按压时长分布，异常高峰/分布差异可能意味着宏或脚本。\n2. 脉冲序列频谱图（右上）：回放按键序列的频谱，突出高频峰可用于发现固定速度的脚本或检测采样率。\n3. delta_t 直方图（左下）：按键时间与谱面时间的偏差分布柱状图，过窄或尖峰异常需关注。\n4. delta_t 散点图（右下）：偏差随时间的散点，固定偏移或规则走势可能可疑。\n\n不提供谱面时，只生成前两个图表。"),
@@ -50,7 +54,7 @@ class omtk_help_data:
             "你可以使用/scatter (/散点)回复包含 .osr/.mr 文件的消息的同时使用 bid (或输入网址)指定谱面，来显示打击位置的二维散点图。\n命令格式：/scatter [b<bid>]\n示例：/scatter b4094064（同时回复回放文件）\n"),
 
             ("pattern", "键型分析", "1", "1",
-            "你可以使用/pattern (/键型)分析谱面键型。注意：键型分析由算法生成，仅供参考。LN键型键型分析处于实验性状态，如有问题请反馈。\n用法1：回复一条包含 .osu/.mc/.osz/.mcz 文件的消息，然后发送 /pattern。\n用法2：直接使用谱面ID：/pattern b<bid>\n示例：/pattern b4094064\n说明：如果要获取详细结果，请在命令中添加-d或-detail，随后将以合并转发消息发送。"),
+            f"你可以使用/pattern (/键型)分析谱面键型。注意：键型分析由算法生成，仅供参考。LN键型键型分析处于实验性状态，如有问题请反馈。\n用法1：回复一条包含 .osu/.mc/.osz/.mcz 文件的消息，然后发送 /pattern。限制：单文件大小 {config.max_file_size_mb if config.max_file_size_mb > 0 else '无限制'} MB; 处理上限 {config.batch_max_charts if config.batch_max_charts > 0 else '无限制'} 个。\n用法2：直接使用谱面ID：/pattern b<bid>\n示例：/pattern b4094064\n说明：如果要获取详细结果，请在命令中添加-d或-detail，随后将以合并转发消息发送。"),
 
             ("percy", "投皮", "1", "1",
             "你可以使用/percy (/投皮)命令来查看或修改 LN 面身图片的投机取巧程度。\n用法：回复一条包含 .png 图片文件的消息，同时发送 /percy [d] [lazer|lzr]。（推荐用文件形式发送以避免被压缩）\n参数说明：\n1. d：目标投机取巧程度（整数）。不填写时仅识别并返回当前程度。\n2. lazer/lzr：按 Lazer 规则处理与显示（可选）。\n示例：/percy（仅识别当前程度）\n/percy 150（将投皮程度调整到 150px）\n/percy 225 lzr（按 Lazer 模式调整）\n注意:\n1. Lazer 模式会进行 -75px 修正（下限 0），同时将图片长度固定在32800px。\n2. 本程序暂不支持渐变颜色面身、非单一颜色、身尾分离或含有图案面身的皮肤。\n3. 请确保回复的图片文件为 .png 格式。\n\n如果你需要批处理、修复面尾白线等高级功能，请前往仓库LeoBlackMT/percy_skin_editor"),
@@ -65,13 +69,13 @@ class omtk_help_data:
             "全部内置段位列表:\n" + format_dan_list_grouped(sorted(dan_data.dan_notes.keys()))),
 
             ("mapview", "键型分析与难度估计", "1", "2",
-            "你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来分析键型和估计难度。本命令别名/rework。\n命令格式：/mapview b<bid> +[mods] x[speed] OD[OD] \n示例：/mapview b4094064 +EZHO x1.25\n/mapview b4094064 +IN OD8\n警告：图包分析开销较大，请勿滥用。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 部分模组和参数冲突。"),
+            f"你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来分析键型和估计难度。本命令别名/rework。\n命令格式：/mapview b<bid> +[mods] x[speed] OD[OD] \n示例：/mapview b4094064 +EZHO x1.25\n/mapview b4094064 +IN OD8\n警告：图包分析开销较大，请勿滥用。限制：单文件大小 {config.max_file_size_mb if config.max_file_size_mb > 0 else '无限制'} MB; 处理上限 {config.batch_max_charts if config.batch_max_charts > 0 else '无限制'} 个。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 部分模组和参数冲突。"),
             
             ("mapview", "键型分析与难度估计", "2", "2",
             "/mapview 参数说明：\n- bid: 以 b 开头，后跟整数，从官网获取谱面。或输入网址。\n- mods: 以 + 开头，后跟模组名缩写（支持 HR/EZ、DT/HT、IN/HO、DC/NC）。不区分大小写，格式同雨沐机器人。\n- speed: 以 x 或 * 或 × 开头，后跟倍速数值（如 x1.5）。倍速必须在 0.25 到 3.0 之间。\n- OD: 以 OD 开头, OD值必须在 -15 到 15 之间。"),
             
             ("ett", "Etterna难度计算", "1", "1",
-             "你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来计算谱面MSD。\n命令格式：/ett b<bid> x[speed]\n示例：/ett b4094064 x1.25\n警告：图包分析开销较大，请勿滥用。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 该命令仅支持 rate（如 x1.5），不支持 mods、OD 覆写和 IN/HO。\n3. 计算结果仅供参考，MSD在不同版本下因算法差异可能不同，本插件使用0.74.0 MinaClac。\n4. 命令别名 /msd"),
+             f"你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来计算谱面MSD。\n命令格式：/ett b<bid> x[speed]\n示例：/ett b4094064 x1.25\n警告：图包分析开销较大，请勿滥用。限制：单文件大小 {config.max_file_size_mb if config.max_file_size_mb > 0 else '无限制'} MB; 处理上限 {config.batch_max_charts if config.batch_max_charts > 0 else '无限制'} 个。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 该命令仅支持 rate（如 x1.5），不支持 mods、OD 覆写和 IN/HO。\n3. 计算结果仅供参考，MSD在不同版本下因算法差异可能不同，本插件使用0.74.0 MinaClac。\n4. 命令别名 /msd"),
 
             ("cvtscore", "成绩转换", "1", "3",
              "你可以使用 /cvtscore (/转换) 将同一回放按目标 ruleset 重算成绩。\n"

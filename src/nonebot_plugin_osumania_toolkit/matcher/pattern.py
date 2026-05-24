@@ -26,6 +26,8 @@ from ..api.osu import download_file_by_id
 from ..file.path import safe_filename
 
 from ..file.cache import CACHE_DIR
+from ..config import Config
+config = Config()
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
@@ -103,7 +105,7 @@ async def _analyze_single_chart(chart_file: Path, file_name: str, rate: float) -
     )
 
 
-async def _analyze_zip_file(zip_file: Path, rate: float) -> list[PatternOutputRow]:
+async def _analyze_zip_file(zip_file: Path, rate: float) -> tuple[list[PatternOutputRow], int]:
     temp_dir = CACHE_DIR / f"pattern_batch_{int(time.time())}_{os.getpid()}"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,9 +119,7 @@ async def _analyze_zip_file(zip_file: Path, rate: float) -> list[PatternOutputRo
                     text=f"图包分析失败 - {e}",
                     card_data=None,
                 )
-            ]
-
-        results: list[PatternOutputRow] = []
+            ], 0
 
         if not chart_files:
             return [
@@ -128,37 +128,38 @@ async def _analyze_zip_file(zip_file: Path, rate: float) -> list[PatternOutputRo
                     text="图包中没有可分析的谱面文件。",
                     card_data=None,
                 )
-            ]
+            ], 0
+
+        total = len(chart_files)
+        max_charts = config.batch_max_charts
+        if max_charts > 0 and total > max_charts:
+            chart_files = chart_files[:max_charts]
+
+        results: list[PatternOutputRow] = []
+        errors: list[str] = []
 
         for chart_file in chart_files:
             try:
                 result = await _analyze_single_chart(chart_file, chart_file.name, rate)
                 results.append(result)
+                await asyncio.sleep(0)
             except PatternNotManiaError:
-                results.append(
-                    PatternOutputRow(
-                        file_name=chart_file.name,
-                        text=f"{chart_file.name}: 不是 mania 模式，无法分析。",
-                        card_data=None,
-                    )
-                )
+                errors.append(f"{chart_file.name}: 不是 mania 模式")
             except PatternParseError as e:
-                results.append(
-                    PatternOutputRow(
-                        file_name=chart_file.name,
-                        text=f"{chart_file.name}: 谱面解析失败 - {e}",
-                        card_data=None,
-                    )
-                )
+                errors.append(f"{chart_file.name}: 谱面解析失败 - {e}")
             except Exception as e:
-                results.append(
-                    PatternOutputRow(
-                        file_name=chart_file.name,
-                        text=f"{chart_file.name}: 分析失败 - {e}",
-                        card_data=None,
-                    )
+                errors.append(f"{chart_file.name}: 分析失败 - {e}")
+
+        if errors:
+            results.append(
+                PatternOutputRow(
+                    file_name="errors",
+                    text="部分谱面分析失败:\n" + "\n".join(errors),
+                    card_data=None,
                 )
-        return results
+            )
+
+        return results, total
     finally:
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -204,8 +205,10 @@ async def handle_pattern(bot: Bot, event: MessageEvent):
 
             if file_name.lower().endswith((".osz", ".mcz")):
                 await pattern.send(f"已收到图包：{file_name}，正在分析，请稍候...")
-                result_rows = await _analyze_zip_file(tmp_file, rate=1.0)
-            else:
+                result_rows, total = await _analyze_zip_file(tmp_file, rate=1.0)
+                if total >= 3:
+                    avalible = sum(1 for r in result_rows if r.card_data is not None)
+                    await pattern.send(f"分析完成，有效 {avalible} / {total}")
                 chart_file = tmp_file
                 await pattern.send(f"已收到文件：{file_name}，请稍候...")
                 result_rows = [await _analyze_single_chart(chart_file, file_name, rate=1.0)]
