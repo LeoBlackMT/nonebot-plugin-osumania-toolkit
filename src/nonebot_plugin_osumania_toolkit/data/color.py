@@ -77,7 +77,7 @@ class sr_color:
     def _pick_readable_text_color(self, star_value: float, bg_color: str, preferred_color: str) -> str:
         if isinstance(star_value, (int, float)) and star_value > 12:
             return "#6563de"
-        if isinstance(star_value, (int, float)) and 6.0 <= star_value <= 6.49:
+        if isinstance(star_value, (int, float)) and 6.0 <= star_value < 6.5:
             return "#000000"
         if isinstance(star_value, (int, float)) and 6.5 <= star_value <= 8.9:
             return "#ffd966"
