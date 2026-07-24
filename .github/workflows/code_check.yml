@@ -23,7 +23,7 @@ jobs:
           ls -la nonebot_plugin_osumania_toolkit/nonebot_plugin_osumania_toolkit || true
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
