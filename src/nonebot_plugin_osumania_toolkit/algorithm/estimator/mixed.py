@@ -249,6 +249,9 @@ def _try_run_roxy_fallback(
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    # 已知限制（Step10 单次解析链路）：Roxy 入口吃谱面文本（roxy.py 本阶段
+    # 不动），无法直接消费 osu_file——即使上游持有已解析 chart，此分支仍按
+    # 文本路径重读文件并自建解析实例。
     try:
         from .roxy import run_roxy_estimator_from_text
 
@@ -272,6 +275,7 @@ def _try_run_azusa_fallback(
     od_flag: Any,
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
+    chart: Any = None,
 ) -> dict[str, Any] | None:
     try:
         from .azusa import estimate_azusa_result
@@ -283,6 +287,7 @@ def _try_run_azusa_fallback(
             cvt_flag,
             sunny_result=sunny_result,
             force_sunny_reference_ho=False,
+            chart=chart,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -293,11 +298,12 @@ def _try_run_daniel_fallback(
     speed_rate: float,
     od_flag: Any,
     cvt_flag: Any,
+    chart: Any = None,
 ) -> dict[str, Any] | None:
     try:
         from .daniel import estimate_daniel_result
 
-        return estimate_daniel_result(source, speed_rate, od_flag, cvt_flag)
+        return estimate_daniel_result(source, speed_rate, od_flag, cvt_flag, chart=chart)
     except Exception:  # noqa: BLE001
         return None
 
@@ -308,12 +314,13 @@ def _ensure_sunny_result(
     od_flag: Any,
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
+    chart: Any = None,
 ) -> dict[str, Any]:
     if sunny_result is not None:
         return sunny_result
     from .sunny import estimate_sunny_result
 
-    return estimate_sunny_result(source, speed_rate, od_flag, cvt_flag)
+    return estimate_sunny_result(source, speed_rate, od_flag, cvt_flag, chart=chart)
 
 
 def estimate_mixed_result(
@@ -322,6 +329,8 @@ def estimate_mixed_result(
     od_flag: Any = None,
     cvt_flag: Any = None,
     sunny_result: dict[str, Any] | None = None,
+    *,
+    chart: Any = None,
 ) -> dict[str, Any]:
     """JS ``runMixedEstimatorFromText`` 直译。
 
@@ -330,7 +339,9 @@ def estimate_mixed_result(
     ``apply_companella_to_mixed_result``，对应 JS app 层的
     ``applyCompanellaToMixedResult`` 消费流程。
     """
-    sunny = _ensure_sunny_result(source, speed_rate, od_flag, cvt_flag, sunny_result)
+    sunny = _ensure_sunny_result(
+        source, speed_rate, od_flag, cvt_flag, sunny_result, chart
+    )
     actual_algorithm = "Sunny"
     column_count = _number(sunny.get("columnCount"))
     if not math.isfinite(column_count) or column_count not in MIXED_SUPPORTED_KEYS:
@@ -373,7 +384,7 @@ def estimate_mixed_result(
                 and should_evaluate_azusa_rc_preference(roxy_result)
             ):
                 azusa_result = _try_run_azusa_fallback(
-                    source, speed_rate, od_flag, cvt_flag, sunny
+                    source, speed_rate, od_flag, cvt_flag, sunny, chart
                 )
                 if should_prefer_azusa_rc_result(roxy_result, azusa_result):
                     selected_result = azusa_result
@@ -393,7 +404,7 @@ def estimate_mixed_result(
                 numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
             else:
                 daniel_result = _try_run_daniel_fallback(
-                    source, speed_rate, od_flag, cvt_flag
+                    source, speed_rate, od_flag, cvt_flag, chart
                 )
                 if can_use_daniel_result(daniel_result):
                     selected_result = daniel_result
@@ -418,7 +429,7 @@ def estimate_mixed_result(
                 actual_algorithm = "Companella"
             else:
                 daniel_result = _try_run_daniel_fallback(
-                    source, speed_rate, od_flag, cvt_flag
+                    source, speed_rate, od_flag, cvt_flag, chart
                 )
                 if can_use_daniel_result(daniel_result):
                     rc_difficulty = str(daniel_result.get("estDiff", rc_difficulty))

@@ -98,9 +98,14 @@ def stream_booster(delta):
 
 # ===== 辅助函数结束 =====
 
-def preprocess_file(file_path, speed_rate, od_flag, cvt_flag):
-    p_obj = osu_file(file_path)
-    p_obj.process()
+def preprocess_file(file_path, speed_rate, od_flag, cvt_flag, *, chart=None):
+    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process；
+    # 下方 mod_IN/mod_HO 会改写物件结构，故防御性 clone，避免污染共享实例。
+    if chart is not None:
+        p_obj = chart.clone()
+    else:
+        p_obj = osu_file(file_path)
+        p_obj.process()
     p = p_obj.get_parsed_data()
     LN_ratio = p[8]
     if cvt_flag:
@@ -530,9 +535,23 @@ def compute_C_and_Ks(K, T, note_seq, key_usage, base_corners):
 
     return C_step, C_step_v2, Ks_step
 
-def calculate(file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None):
+def calculate(
+    file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None, *, chart=None
+):
     # === 基础设置与解析 ===
-    status, x, K, T, note_seq, note_seq_by_column, LN_seq, tail_seq, LN_seq_by_column, LN_ratio, column_count = preprocess_file(file_path, speed_rate, od_flag, cvt_flag)
+    (
+        status,
+        x,
+        K,
+        T,
+        note_seq,
+        note_seq_by_column,
+        LN_seq,
+        tail_seq,
+        LN_seq_by_column,
+        LN_ratio,
+        column_count,
+    ) = preprocess_file(file_path, speed_rate, od_flag, cvt_flag, chart=chart)
 
     if status == "Fail":
         return -1

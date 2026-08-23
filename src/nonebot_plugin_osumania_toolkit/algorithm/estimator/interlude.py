@@ -111,16 +111,23 @@ def _resolve_source_path(source: Any) -> Path:
     raise TypeError("Unsupported Interlude source. Provide osu text or a chart path.")
 
 
-def build_interlude_rows(source: Any, cvt_flag: Any = None) -> dict[str, Any]:
+def build_interlude_rows(
+    source: Any, cvt_flag: Any = None, *, chart: Any = None
+) -> dict[str, Any]:
     temp_path: Path | None = None
-    path = _resolve_source_path(source)
-    if path.exists() and path.is_file() and path.suffix.lower() == ".osu":
-        chart = osu_file(str(path))
-        chart.process()
+    if chart is not None:
+        # Step10 单次解析链路：clone 防御（mod_IN/mod_HO 会改写物件结构）。
+        working = chart.clone()
     else:
-        temp_path = path if path.exists() and path.is_file() else None
-        chart = osu_file(str(path))
-        chart.process()
+        path = _resolve_source_path(source)
+        if path.exists() and path.is_file() and path.suffix.lower() == ".osu":
+            working = osu_file(str(path))
+            working.process()
+        else:
+            temp_path = path if path.exists() and path.is_file() else None
+            working = osu_file(str(path))
+            working.process()
+    chart = working
 
     try:
         if chart.status == "NotMania":
@@ -405,13 +412,17 @@ def calculate_interlude_difficulty(rate: float, note_rows: list[dict[str, Any]])
     return {"noteDifficulty": note_difficulty, "strains": strains, "variety": variety, "hands": hands, "overall": overall}
 
 
-def calculate_interlude_star(source: Any, rate: float = 1.0, cvt_flag: Any = None) -> float:
+def calculate_interlude_star(
+    source: Any, rate: float = 1.0, cvt_flag: Any = None, *, chart: Any = None
+) -> float:
     resolved_rate = rate if math.isfinite(rate) and rate > 0 else 1.0
-    built = build_interlude_rows(source, cvt_flag)
+    built = build_interlude_rows(source, cvt_flag, chart=chart)
     difficulty = calculate_interlude_difficulty(resolved_rate, built["rows"])
     overall = float(difficulty.get("overall", 0.0))
     return overall if math.isfinite(overall) else 0.0
 
 
-def estimate_interlude_star_from_chart(source: Any, rate: float = 1.0, cvt_flag: Any = None) -> float:
-    return calculate_interlude_star(source, rate, cvt_flag)
+def estimate_interlude_star_from_chart(
+    source: Any, rate: float = 1.0, cvt_flag: Any = None, *, chart: Any = None
+) -> float:
+    return calculate_interlude_star(source, rate, cvt_flag, chart=chart)

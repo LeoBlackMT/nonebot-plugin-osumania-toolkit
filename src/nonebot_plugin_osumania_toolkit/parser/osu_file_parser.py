@@ -99,6 +99,48 @@ class osu_file:
         self.note_rows: list[tuple[int, list[int]]] = []
         self._timing_index: list[int] = []
 
+    def clone(self) -> osu_file:
+        """
+        summary:
+            复制全部实例属性，供“单次解析 + 多消费者分发”使用。
+        Args:
+            无。
+        Returns:
+            与原对象字段一致的独立实例。
+        Note:
+            容器属性一律浅拷贝：消费者对 clone 的顶层变更（``_reset_collections``
+            的 ``clear``、``mod_IN``/``mod_HO`` 的 ``append``/重绑定）不会波及
+            原对象或其它 clone；``note_times`` 的列时间列表同步复制一层，
+            防止跨消费者就地排序/追加外溢。嵌套元素（breaks 内层 list、
+            note_rows 元组等）按引用共享——现有消费者均只读嵌套元素。
+        """
+        dup = osu_file.__new__(osu_file)
+        dup.file_path = self.file_path
+        dup.assume_replay_times_scaled = self.assume_replay_times_scaled
+        dup.keep_float_times = self.keep_float_times
+        dup.log_level_override = self.log_level_override
+
+        dup.od = self.od
+        dup.column_count = self.column_count
+        dup.GameMode = self.GameMode
+        dup.status = self.status
+        dup.error_message = self.error_message
+        dup.LN_ratio = self.LN_ratio
+
+        dup.columns = list(self.columns)
+        dup.note_starts = list(self.note_starts)
+        dup.note_ends = list(self.note_ends)
+        dup.note_types = list(self.note_types)
+
+        dup.note_times = {col: list(times) for col, times in self.note_times.items()}
+        dup.meta_data = dict(self.meta_data)
+        dup.breaks = list(self.breaks)
+        dup.object_intervals = list(self.object_intervals)
+        dup.timing_points = list(self.timing_points)
+        dup.note_rows = list(self.note_rows)
+        dup._timing_index = list(self._timing_index)
+        return dup
+
     def _reset_collections(self) -> None:
         self.columns.clear()
         self.note_starts.clear()

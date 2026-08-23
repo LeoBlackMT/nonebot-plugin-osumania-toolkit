@@ -82,10 +82,15 @@ def _rescale_high(sr: float) -> float:
 
 
 def _preprocess_daniel(
-    file_path: str, speed_rate: float
+    file_path: str, speed_rate: float, *, chart: Any = None
 ) -> dict[str, Any]:
-    p_obj = osu_file(file_path)
-    p_obj.process()
+    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process；
+    # clone 防御，避免共享实例被下游改写。
+    if chart is not None:
+        p_obj = chart.clone()
+    else:
+        p_obj = osu_file(file_path)
+        p_obj.process()
     parsed = p_obj.get_parsed_data()
     # parsed: [column_count, columns, note_starts, note_ends, note_types, od, GameMode, status, LN_ratio, meta_data, breaks, object_intervals]
 
@@ -520,14 +525,15 @@ def _smooth_d_for_graph(
 # ═══════════════════════════════════════════════════════════════════
 
 def calculate_daniel(
-    source: Any, speed_rate: float = 1.0, od_flag: Any = None, with_graph: bool = False
+    source: Any, speed_rate: float = 1.0, od_flag: Any = None, with_graph: bool = False,
+    *, chart: Any = None,
 ):
     """calculateDaniel(osuText, speedRate, odFlag, {withGraph})."""
     path = source
     if isinstance(source, Path):
         path = str(source)
 
-    pre = _preprocess_daniel(str(path), speed_rate)
+    pre = _preprocess_daniel(str(path), speed_rate, chart=chart)
 
     status = pre["status"]
     if status == "Fail":

@@ -195,17 +195,26 @@ def estimate_companella_result(
     sunny_result: dict[str, Any] | None = None,
     interlude_star: float | None = None,
     msd_values: dict[str, float] | None = None,
+    chart: Any = None,
 ) -> dict[str, Any]:
-    sunny_result = sunny_result or estimate_sunny_result(source, speed_rate, None, cvt_flag)
+    sunny_result = sunny_result or estimate_sunny_result(
+        source, speed_rate, None, cvt_flag, chart=chart
+    )
     if int(sunny_result.get("columnCount", 0) or 0) != 4:
         raise UnsupportedKeyError("Companella only supports 4K maps")
 
     if interlude_star is None:
-        interlude_star = calculate_interlude_star(source, speed_rate, cvt_flag)
+        interlude_star = calculate_interlude_star(source, speed_rate, cvt_flag, chart=chart)
 
     if msd_values is None:
-        chart = load_osu_chart(_resolve_source_for_analysis(source))
-        msd_values = compute_difficulties(chart, music_rate=speed_rate, keycount=4)
+        # Step10 单次解析链路：clone 防御（compute_difficulties 只读，但保持
+        # 与其他消费者一致的约定）。
+        chart_obj = (
+            chart.clone()
+            if chart is not None
+            else load_osu_chart(_resolve_source_for_analysis(source))
+        )
+        msd_values = compute_difficulties(chart_obj, music_rate=speed_rate, keycount=4)
 
     companella = classify_companella_difficulty(
         msd_values=msd_values,

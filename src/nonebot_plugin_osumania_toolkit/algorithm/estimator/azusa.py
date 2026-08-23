@@ -443,9 +443,15 @@ def estimate_azusa_result(
     source: Any, speed_rate: float = 1.0, od_flag: Any = None, cvt_flag: Any = None,
     *, sunny_result: dict[str, Any] | None = None, daniel_result: dict[str, Any] | None = None,
     with_graph: bool = False, force_sunny_reference_ho: bool = True,
+    chart: Any = None,
 ) -> dict[str, Any]:
-    chart = load_osu_chart(resolve_chart_path(source))
-    parsed = chart.get_parsed_data()
+    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process（clone 防御，
+    # 避免共享实例被本函数或下游参照调用突变）。局部变量相应更名 chart_obj。
+    if chart is not None:
+        chart_obj = chart.clone()
+    else:
+        chart_obj = load_osu_chart(resolve_chart_path(source))
+    parsed = chart_obj.get_parsed_data()
     ln_ratio = float(parsed[8] or 0) if len(parsed) > 8 else 0.0
     column_count = int(parsed[0] or 0) if len(parsed) > 0 else 0
     status = str(parsed[7] or "") if len(parsed) > 7 else ""
@@ -486,7 +492,7 @@ def estimate_azusa_result(
     else:
         try:
             from .daniel import estimate_daniel_result as _dr
-            daniel_result_val = _dr(source, speed_rate, od_flag, cvt_flag)
+            daniel_result_val = _dr(source, speed_rate, od_flag, cvt_flag, chart=chart)
             daniel_numeric = _estimate_daniel_numeric(daniel_result_val)
             daniel_has_native = _has_daniel_native_numeric(daniel_result_val)
         except Exception:
@@ -497,7 +503,10 @@ def estimate_azusa_result(
     else:
         try:
             from .sunny import estimate_sunny_result as _sr
-            sunny_result_val = _sr(source, speed_rate, od_flag, "HO" if force_sunny_reference_ho else cvt_flag)
+            sunny_result_val = _sr(
+                source, speed_rate, od_flag,
+                "HO" if force_sunny_reference_ho else cvt_flag, chart=chart,
+            )
             sunny_numeric = _estimate_sunny_numeric(sunny_result_val)
         except Exception:
             pass

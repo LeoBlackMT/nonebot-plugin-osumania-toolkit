@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import shutil
 import time
@@ -14,20 +15,27 @@ from ..estimator.sunny import est_diff, estimate_sunny_result
 from ..utils import extract_zip_file, is_mc_file, parse_osu_filename
 
 
-async def get_rework_result(file_path: str, speed_rate: float, od_flag, cvt_flag):
+async def get_rework_result(
+    file_path: str, speed_rate: float, od_flag, cvt_flag, *, chart=None
+):
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             None,
-            estimate_sunny_result,
-            str(file_path),
-            speed_rate,
-            od_flag,
-            cvt_flag,
+            functools.partial(
+                estimate_sunny_result,
+                str(file_path),
+                speed_rate,
+                od_flag,
+                cvt_flag,
+                chart=chart,
+            ),
         )
     except Exception as exc:
         if "Future object is not initialized" in str(exc):
-            result = estimate_sunny_result(str(file_path), speed_rate, od_flag, cvt_flag)
+            result = estimate_sunny_result(
+                str(file_path), speed_rate, od_flag, cvt_flag, chart=chart
+            )
         else:
             raise
 

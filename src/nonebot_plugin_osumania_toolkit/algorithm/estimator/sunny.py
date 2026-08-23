@@ -63,9 +63,14 @@ def estimate_sunny_result(
     speed_rate: float = 1.0,
     od_flag: Any = None,
     cvt_flag: Any = None,
+    *,
+    chart: Any = None,
 ) -> dict[str, Any]:
-    path = resolve_chart_path(source)
-    result = calculate_sunny(str(path), speed_rate, od_flag, cvt_flag)
+    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process（底层
+    # preprocess 因 IN/HO 会改写物件结构，内部已先行 clone 防御）。
+    path_source = chart if chart is not None else source
+    path = resolve_chart_path(path_source)
+    result = calculate_sunny(str(path), speed_rate, od_flag, cvt_flag, chart=chart)
 
     if result == -1:
         raise ParseError("Beatmap parse failed")
