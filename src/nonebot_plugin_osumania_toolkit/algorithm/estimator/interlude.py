@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import struct
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -21,9 +22,15 @@ def f32(value: float) -> float:
     # 对齐 JS numberUtils.f32 / Math.fround：真实 IEEE binary32
     # round-to-nearest-even 舍入（此前为恒等函数，导致 interludeSr ~2e-6 系统性
     # 负偏；见 tests/golden/reports/msd_quantization.md 附录的定位实验）。
-    import struct
-
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+# JS 侧以 f32() 包裹的模块常量——binary32 值与 double 字面量不同,必须显式量化:
+# difficulty.js: CURVE_POWER=f32(0.6), CURVE_SCALE=f32(0.4056)
+# strain.js:     STRAIN_SCALE=f32(0.01626)
+_F32_CURVE_POWER = f32(0.6)
+_F32_CURVE_SCALE = f32(0.4056)
+_F32_STRAIN_SCALE = f32(0.01626)
 
 
 def round_to_even(value: float) -> int:
@@ -188,11 +195,14 @@ def calculate_note_ratings(rate: float, note_rows: list[dict[str, Any]]) -> list
                     continue
 
                 trill_delta = (time - last_note_in_column[hand_k]) / rate_value
-                x = 0.02 * trill_delta
+                x = f32(0.02 * trill_delta)
                 if not math.isfinite(x) or x <= 0:
                     trill_value = 0.0
                 else:
-                    trill_value = (300.0 / x) - (300.0 / math.pow(x, 10.0) / 10.0)
+                    # JS msToStreamBpm:x 与整个表达式都在 fround 边界上。
+                    trill_value = f32(
+                        (300.0 / x) - (300.0 / math.pow(x, 10.0) / 10.0)
+                    )
                     if trill_value < 0:
                         trill_value = 0.0
                 ratio = jack_delta / trill_delta if trill_delta > 0 else 0.0
@@ -256,14 +266,17 @@ def calculate_variety(rate: float, note_rows: list[dict[str, Any]], note_difficu
 
 
 def _create_strain_function(half_life: float):
-    decay_rate = math.log(0.5) / half_life
+    # JS strain.js createStrainFunction:每个运算边界都有 fround。
+    decay_rate = f32(math.log(0.5) / half_life)
 
     def strain(value: float, input_value: float, delta: float) -> float:
         clamped_delta = min(200.0, delta)
-        decay = math.exp(decay_rate * clamped_delta)
-        time_cap_decay = math.exp(decay_rate * (delta - 200.0)) if delta > 200.0 else 1.0
-        a = value * time_cap_decay
-        b = input_value * input_value * 0.01626
+        decay = f32(math.exp(decay_rate * clamped_delta))
+        time_cap_decay = (
+            f32(math.exp(decay_rate * (delta - 200.0))) if delta > 200.0 else 1.0
+        )
+        a = f32(value * time_cap_decay)
+        b = f32(input_value * input_value * _F32_STRAIN_SCALE)
         return f32(b - (b - a) * decay)
 
     return strain
@@ -361,14 +374,14 @@ def weighted_overall_difficulty(data: list[float]) -> float:
     total = 0.0
     for i, value in enumerate(values):
         x = max(0.0, (float(i) + 2500.0 - length) / 2500.0)
-        w = 0.002 + math.pow(x, 4.0)
+        w = f32(0.002 + math.pow(x, 4.0))
         weight += w
         total += value * w
 
     if not math.isfinite(weight) or weight <= 0:
         return 0.0
 
-    transformed = math.pow(total / weight, 0.6) * 0.4056
+    transformed = math.pow(total / weight, _F32_CURVE_POWER) * _F32_CURVE_SCALE
     return f32(transformed) if math.isfinite(transformed) else 0.0
 
 
