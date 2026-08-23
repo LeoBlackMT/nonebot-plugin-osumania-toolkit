@@ -165,5 +165,7 @@ cython_debug/
 /samples
 /backup
 /temp
+/tests
+/scripts
 AGENTS.md
 .omo/
