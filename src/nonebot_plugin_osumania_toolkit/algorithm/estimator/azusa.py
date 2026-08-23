@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .shared import load_osu_chart, resolve_chart_path
+from .shared import js_fixed, load_osu_chart, resolve_chart_path
 from ...data.estimator import estimator_data
 
 AZUSA_CONFIG = estimator_data.AZUSA_CONFIG
@@ -26,7 +26,7 @@ def _safe_div(a: float, b: float, fallback: float = 0.0) -> float:
 def _fmt4(v: float | None) -> float | None:
     if v is None or not math.isfinite(v):
         return None
-    return round(v, 4)
+    return js_fixed(v, 4)
 
 
 def _piecewise_linear(x: float, knots: list[list[float]], value_col: int = 1) -> float:
@@ -101,8 +101,8 @@ def _estimate_daniel_numeric(result: dict[str, Any] | None) -> float | None:
     if not math.isfinite(star):
         return None
     if star >= 6.56:
-        return round(11.0 + _clamp((star - 6.56) / 0.58, 0.0, 9.99), 2)
-    return round(-2.0 + 13.0 * math.pow(_clamp(star / 6.56, 0.0, 1.0), 1.72), 2)
+        return js_fixed(11.0 + _clamp((star - 6.56) / 0.58, 0.0, 9.99), 2)
+    return js_fixed(-2.0 + 13.0 * math.pow(_clamp(star / 6.56, 0.0, 1.0), 1.72), 2)
 
 
 def _has_daniel_native_numeric(result: dict[str, Any] | None) -> bool:
@@ -123,7 +123,7 @@ def _estimate_sunny_numeric(result: dict[str, Any] | None) -> float | None:
     star = float(result.get("star", math.nan))
     if not math.isfinite(star):
         return None
-    return round(_clamp(2.85 + 1.33 * star, -2.0, 20.0), 2)
+    return js_fixed(_clamp(2.85 + 1.33 * star, -2.0, 20.0), 2)
 
 
 def _quantile_from_sorted(vals: list[float], q: float) -> float:
@@ -462,10 +462,9 @@ def estimate_azusa_result(
         return _build_error_result("TooShort", f"Insufficient notes for stable estimate ({len(taps)})", ln_ratio, column_count)
 
     ts = 1.0 / speed_rate if speed_rate != 0 else 1.0
-    _annotate_rows(taps, AZUSA_CONFIG["rowToleranceMs"] * ts)
     if ts != 1.0:
         taps = [{"t": n["t"] * ts, "c": n["c"], "hand": n["hand"], "rowSize": n["rowSize"]} for n in taps]
-        _annotate_rows(taps, AZUSA_CONFIG["rowToleranceMs"])
+    _annotate_rows(taps, AZUSA_CONFIG["rowToleranceMs"] * ts)
 
     curve = _build_difficulty_curve(taps)
     primary_numeric = _compute_azusa_numeric_from_curve(curve, len(taps))
@@ -526,11 +525,11 @@ def estimate_azusa_result(
     est_diff = _numeric_to_rc_label(final)
 
     return {
-        "star": round(3.4 + 0.38 * final, 4), "lnRatio": ln_ratio, "columnCount": column_count,
-        "estDiff": est_diff, "numericDifficulty": round(final, 2),
+        "star": js_fixed(3.4 + 0.38 * final, 4), "lnRatio": ln_ratio, "columnCount": column_count,
+        "estDiff": est_diff, "numericDifficulty": js_fixed(final, 2),
         "numericDifficultyHint": "azusa-rc-v1",
         "graph": sunny_result_val.get("graph") if (with_graph and sunny_result_val) else None,
-        "rawNumericDifficulty": round(primary_numeric, 4),
+        "rawNumericDifficulty": js_fixed(primary_numeric, 4),
         "debug": {
             "primaryNumeric": _fmt4(primary_numeric), "blendNumeric": _fmt4(nd),
             "danielNumeric": _fmt4(daniel_numeric), "danielNumericForBlend": _fmt4(dnfb),
