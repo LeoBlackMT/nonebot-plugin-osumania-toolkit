@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bisect
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +40,19 @@ def collect_data(data: list, new_datum) -> None:
         无。
     """
     data.append(new_datum)
+
+
+def _js_round(value: float) -> int:
+    """
+    summary:
+        JS ``Math.round`` 等价实现：半值向 +∞ 取整。
+        （Python 内建 round 为银行家舍入，与 JS 在 .5 边界不一致。）
+    Args:
+        value: 待取整浮点数。
+    Returns:
+        取整结果。
+    """
+    return int(math.floor(value + 0.5))
 
 
 class osu_file:
@@ -417,41 +431,31 @@ class osu_file:
     def mod_IN(self) -> None:
         """
         summary:
-            将谱面转换为反键。
+            将谱面转换为反键（JS 参照: osuFileParser.js ``modIN``）。
+            按列仅收集 noteStart（head）作为边界（原 LN 尾不作为边界）；
+            相邻 head 对生成反键 LN，duration<=0 不跳过（产生零长/负长 LN）；
+            全部物件替换为 type=128 的 hold，随后重算快照字段。
         Args:
             无。
         Returns:
             无。
         """
-        notes_by_col: dict[int, list[tuple[int, int, int]]] = {}
-        for col, start, end, note_type in zip(
-            self.columns, self.note_starts, self.note_ends, self.note_types
-        ):
-            notes_by_col.setdefault(col, []).append((start, end, note_type))
+        starts_by_col: dict[int, list[int]] = {}
+        for col, start in zip(self.columns, self.note_starts):
+            starts_by_col.setdefault(col, []).append(int(start))
 
         new_objects: list[tuple[int, int, int]] = []
-        for col, notes in notes_by_col.items():
-            locations: list[float] = []
-            for start, end, note_type in notes:
-                locations.append(float(start))
-                if (note_type & 128) != 0:
-                    locations.append(float(end))
-
+        for col, locations in starts_by_col.items():
             locations.sort()
             for idx in range(len(locations) - 1):
-                start_time = locations[idx]
-                next_time = locations[idx + 1]
+                start_time = float(locations[idx])
+                next_time = float(locations[idx + 1])
                 duration = next_time - start_time
-                if duration <= 0:
-                    continue
-
                 beat_length = self.get_beat_length_at(next_time)
                 duration = max(duration / 2.0, duration - beat_length / 4.0)
-                start_time_int = int(round(start_time))
-                end_time_int = int(round(start_time + duration))
-                if end_time_int <= start_time_int:
-                    end_time_int = start_time_int + 1
-                new_objects.append((start_time_int, col, end_time_int))
+                new_objects.append(
+                    (_js_round(start_time), col, _js_round(start_time + duration))
+                )
 
         new_objects.sort(key=lambda item: (item[0], item[1]))
 

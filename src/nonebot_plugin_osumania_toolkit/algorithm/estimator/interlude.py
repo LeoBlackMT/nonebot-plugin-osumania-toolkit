@@ -18,7 +18,12 @@ class NoteType:
 
 
 def f32(value: float) -> float:
-    return float(value)
+    # 对齐 JS numberUtils.f32 / Math.fround：真实 IEEE binary32
+    # round-to-nearest-even 舍入（此前为恒等函数，导致 interludeSr ~2e-6 系统性
+    # 负偏；见 tests/golden/reports/msd_quantization.md 附录的定位实验）。
+    import struct
+
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def round_to_even(value: float) -> int:
@@ -71,10 +76,12 @@ def _normalize_cvt_flag(cvt_flag: Any) -> str | None:
 
 def _apply_conversion_flag(chart: osu_file, cvt_flag: Any) -> None:
     normalized = _normalize_cvt_flag(cvt_flag)
-    if normalized == "IN" and hasattr(chart, "modIN"):
-        chart.modIN()
-    elif normalized == "HO" and hasattr(chart, "modHO"):
-        chart.modHO()
+    # 修复：parser 的方法名是 snake_case（mod_IN/mod_HO）；旧代码探测 camelCase
+    # （modIN/modHO）导致 hasattr 恒 False、转换从未生效的死调用点。
+    if normalized == "IN" and hasattr(chart, "mod_IN"):
+        chart.mod_IN()
+    elif normalized == "HO" and hasattr(chart, "mod_HO"):
+        chart.mod_HO()
 
 
 def _resolve_source_path(source: Any) -> Path:
