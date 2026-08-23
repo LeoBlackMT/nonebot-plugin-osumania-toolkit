@@ -65,15 +65,20 @@ def interp_values(new_x, old_x, old_vals):
 def step_interp(new_x, old_x, old_vals):
     """
     summary:
-        对每个查询点返回其左侧最近采样点的值。
+        对每个查询点返回其左侧最近采样点的值（严格小于语义）。
     Args:
         new_x: 新查询点。
         old_x: 原始采样点。
         old_vals: 原始采样值。
     Returns:
         零阶保持插值结果。
+    Note:
+        Sunny 专属（对齐 js sunnyAlgorithm.stepInterp 的
+        ``while oldX[idx+1] < x``）：精确命中时取*前一个*采样。
+        daniel 保持 side='right' 语义，勿同步过去。
     """
-    indices = np.searchsorted(old_x, new_x, side='right') - 1
+    # side='left' 给出第一个 >= new_x 的插入位；减一即"最后一个严格小于 new_x"的元素。
+    indices = np.searchsorted(old_x, new_x, side='left') - 1
     indices = np.clip(indices, 0, len(old_vals)-1)
     return old_vals[indices]
 
@@ -151,6 +156,12 @@ def preprocess_file(file_path, speed_rate, od_flag, cvt_flag):
     x = 0.3 * ((64.5 - math.ceil(od * 3)) / 500)**0.5
     x = min(x, 0.6*(x-0.09)+0.09)
     note_seq.sort(key=lambda tup: (tup[1], tup[0]))
+    # D3: 对齐 js preprocessFile L194-199 —— 排序后 shift() 丢掉最早音符
+    # （cs ManiaDifficultyCalculator 的 for i=1 起点）。JS 中 shift 发生在
+    # noteSeqByColumn / lnSeq / tailSeq / lnSeqByColumn / T 等*全部*派生结构
+    # 构建之前，此处位置与其一致：后续结构均基于截断后的 note_seq。
+    if note_seq:
+        note_seq = note_seq[1:]
 
     # 按列分组
     note_dict = defaultdict(list)
@@ -496,17 +507,28 @@ def compute_Rbar(K, T, x, note_seq_by_column, tail_seq, base_corners):
     return smooth_on_corners(base_corners, R_step, window=500, scale=0.001, mode='sum')
 
 def compute_C_and_Ks(K, T, note_seq, key_usage, base_corners):
-    # C(s)：500 ms 内的 note 数
+    # C(s)：500 ms 窗口内的 head 数（heads-only）
     note_hit_times = np.array(sorted(n[1] for n in note_seq), dtype=float)
     lo = np.searchsorted(note_hit_times, base_corners - 500, side='left')
     hi = np.searchsorted(note_hit_times, base_corners + 500, side='left')
     C_step = (hi - lo).astype(float)
 
+    # D2: C(s) V2 —— heads + LN tails（tail >= 0 才并入），对齐 js
+    # computeCAndKs 的 noteHitTimesV2 / CStepV2；窗口逻辑与原 C_step 完全一致，
+    # 仅计数集合不同。effectiveWeights 恒用 V2（js L938-940 的非 classic 分支）。
+    note_hit_times_v2 = np.array(
+        sorted(t for n in note_seq for t in ((n[1],) if n[2] < 0 else (n[1], n[2]))),
+        dtype=float,
+    )
+    lo_v2 = np.searchsorted(note_hit_times_v2, base_corners - 500, side='left')
+    hi_v2 = np.searchsorted(note_hit_times_v2, base_corners + 500, side='left')
+    C_step_v2 = (hi_v2 - lo_v2).astype(float)
+
     # Ks：局部按键使用数量（至少为 1）
     usage_stack = np.stack([key_usage[k] for k in range(K)], axis=0)
     Ks_step = np.maximum(usage_stack.sum(axis=0), 1).astype(float)
 
-    return C_step, Ks_step
+    return C_step, C_step_v2, Ks_step
 
 def calculate(file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None):
     # === 基础设置与解析 ===
@@ -516,6 +538,9 @@ def calculate(file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None):
         return -1
     if status == "NotMania":
         return -2
+    # 对齐 js L885：D3 shift 后 note_seq 可能为空（单音符图），JS 返回 -1。
+    if not note_seq or K <= 0:
+        return -1
 
     all_corners, base_corners, A_corners = get_corners(T, note_seq)
 
@@ -545,8 +570,9 @@ def calculate(file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None):
     Rbar = compute_Rbar(K, T, x, note_seq_by_column, tail_seq, base_corners)
     Rbar = interp_values(all_corners, base_corners, Rbar)
 
-    C_step, Ks_step = compute_C_and_Ks(K, T, note_seq, key_usage, base_corners)
+    C_step, C_step_v2, Ks_step = compute_C_and_Ks(K, T, note_seq, key_usage, base_corners)
     C_arr = step_interp(all_corners, base_corners, C_step)
+    C_arr_v2 = step_interp(all_corners, base_corners, C_step_v2)
     Ks_arr = step_interp(all_corners, base_corners, Ks_step)
 
     # === 最终计算 ===
@@ -576,7 +602,9 @@ def calculate(file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None):
     gaps[1:-1] = (all_corners[2:] - all_corners[:-2]) / 2.0
 
     # 每个角点的有效权重是密度与间隔的乘积。
-    effective_weights = C_arr * gaps
+    # D2: 恒用 V2（heads+tails 计数）——js L938-940 `classicMod ? CArr : CArrV2`
+    # 的非 classic 分支；S 公式（上方）中的 C_arr 保持 heads-only 不变。
+    effective_weights = C_arr_v2 * gaps
     df_sorted = df_corners.sort_values('D')
     D_sorted = df_sorted['D'].values
     sorted_indices = df_sorted.index.to_numpy()
@@ -591,8 +619,10 @@ def calculate(file_path, speed_rate = 1.0, od_flag = None, cvt_flag = None):
 
     indices = np.searchsorted(norm_cum_weights, target_percentiles, side='left')
 
-    percentile_93 = np.mean(D_sorted[indices[:4]])
-    percentile_83 = np.mean(D_sorted[indices[4:8]])
+    # clamp：对齐 js L957-958 的 Math.min(idx, DSorted.length-1) 保护。
+    n_d = len(D_sorted)
+    percentile_93 = np.mean(D_sorted[np.minimum(indices[:4], n_d - 1)])
+    percentile_83 = np.mean(D_sorted[np.minimum(indices[4:8], n_d - 1)])
 
     weighted_mean = (np.sum(D_sorted**5 * w_sorted) / np.sum(w_sorted))**(1 / 5)
 

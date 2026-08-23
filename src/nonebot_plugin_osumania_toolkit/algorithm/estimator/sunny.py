@@ -8,101 +8,39 @@ from .exceptions import NotManiaError, ParseError
 from .shared import resolve_chart_path
 
 
+def _interval_lookup(sr: float, table: list[tuple[float, float, str]], fallback_label: str) -> str:
+    """对齐 js reworkEstimatorUtils.intervalLookup：表内命中返回名字；
+    低于首项/高于末项时用表端点名构造 '< name' / '> name'；其余（表内空隙）回退。"""
+    for lower, upper, name in table:
+        if lower <= sr <= upper:
+            return name
+    if sr < table[0][0]:
+        return f"< {table[0][2]}"
+    if sr > table[-1][1]:
+        return f"> {table[-1][2]}"
+    return fallback_label
+
+
 def est_diff(sr: float, ln_ratio: float, column_count: int) -> str:
     if column_count == 4:
-        rc_diff = None
-        for lower, upper, name in sr_intervals_data.RC_intervals_4K:
-            if lower <= sr <= upper:
-                rc_diff = name
-                break
-        if rc_diff is None:
-            if sr < 1.502:
-                rc_diff = "< Intro 1 low"
-            elif sr > 11.129:
-                rc_diff = "> Theta high"
-            else:
-                rc_diff = "未知RC难度"
-
+        rc_diff = _interval_lookup(sr, sr_intervals_data.RC_intervals_4K, "Unknown RC difficulty")
         if ln_ratio < 0.15:
-            return f"{rc_diff}"
-
-        ln_diff = None
-        for lower, upper, name in sr_intervals_data.LN_intervals_4K:
-            if lower <= sr <= upper:
-                ln_diff = name
-                break
-        if ln_diff is None:
-            if sr < 4.832:
-                ln_diff = "< LN 5 mid"
-            elif sr > 9.589:
-                ln_diff = "> LN 17 high"
-            else:
-                ln_diff = "未知LN难度"
-
+            return rc_diff
+        ln_diff = _interval_lookup(sr, sr_intervals_data.LN_intervals_4K, "Unknown LN difficulty")
         return f"{rc_diff} || {ln_diff}"
 
     if column_count == 6:
-        rc_diff = None
-        for lower, upper, name in sr_intervals_data.RC_intervals_6K:
-            if lower <= sr <= upper:
-                rc_diff = name
-                break
-        if rc_diff is None:
-            if sr < 3.430:
-                rc_diff = "< Regular 0 low"
-            elif sr > 7.965:
-                rc_diff = "> Regular 9 high"
-            else:
-                rc_diff = "未知RC难度"
-
+        rc_diff = _interval_lookup(sr, sr_intervals_data.RC_intervals_6K, "Unknown RC difficulty")
         if ln_ratio < 0.15:
-            return f"{rc_diff}"
-
-        ln_diff = None
-        for lower, upper, name in sr_intervals_data.LN_intervals_6K:
-            if lower <= sr <= upper:
-                ln_diff = name
-                break
-        if ln_diff is None:
-            if sr < 3.530:
-                ln_diff = "< LN 0 low"
-            elif sr > 9.700:
-                ln_diff = "> LN Finish high"
-            else:
-                ln_diff = "未知LN难度"
-
+            return rc_diff
+        ln_diff = _interval_lookup(sr, sr_intervals_data.LN_intervals_6K, "Unknown LN difficulty")
         return f"{rc_diff} || {ln_diff}"
 
     if column_count == 7:
-        rc_diff = None
-        for lower, upper, name in sr_intervals_data.RC_intervals_7K:
-            if lower <= sr <= upper:
-                rc_diff = name
-                break
-        if rc_diff is None:
-            if sr < 3.5085:
-                rc_diff = "< Regular 0 low"
-            elif sr > 10.544:
-                rc_diff = "> Regular Stellium high"
-            else:
-                rc_diff = "未知RC难度"
-
+        rc_diff = _interval_lookup(sr, sr_intervals_data.RC_intervals_7K, "Unknown RC difficulty")
         if ln_ratio < 0.15:
-            return f"{rc_diff}"
-
-        ln_diff = None
-        for lower, upper, name in sr_intervals_data.LN_intervals_7K:
-            if lower <= sr <= upper:
-                ln_diff = name
-                break
-        if ln_diff is None:
-            if sr < 4.836:
-                ln_diff = "< LN 3 low"
-            elif sr > 10.666:
-                ln_diff = "> LN Stellium high"
-            else:
-                ln_diff = "未知LN难度"
-
+            return rc_diff
+        ln_diff = _interval_lookup(sr, sr_intervals_data.LN_intervals_7K, "Unknown LN difficulty")
         return f"{rc_diff} || {ln_diff}"
 
     return "Unsupported"
