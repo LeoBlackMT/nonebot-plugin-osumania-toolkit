@@ -65,6 +65,13 @@ def estimate_daniel_dan(star: float) -> dict[str, Any]:
 
     dan_order = list(DAN_MEANS.keys())
     means = [DAN_MEANS[name] for name in dan_order]
+    # 段位体系作者前缀（Reform 标注）：Zeta/Eta/Theta 的显示名带系列作者。
+    author_by_index = {5: "Emik", 6: "Thaumiel", 7: "CloverWisp"}
+
+    def _display(index: int) -> str:
+        author = author_by_index.get(index)
+        name = dan_order[index]
+        return f"{author} {name}" if author else name
 
     boundaries: list[tuple[float, float]] = []
     for index, mean in enumerate(means):
@@ -81,10 +88,10 @@ def estimate_daniel_dan(star: float) -> dict[str, Any]:
         boundaries.append((lower, upper))
 
     if value < boundaries[0][0]:
-        return {"label": f"< {dan_order[0]} Low", "numeric": None}
+        return {"label": f"< {_display(0)} Low", "numeric": None}
 
     if value >= boundaries[-1][1]:
-        return {"label": f"> {dan_order[-1]} High", "numeric": None}
+        return {"label": f"> {_display(len(dan_order) - 1)} High", "numeric": None}
 
     for index, (lower, upper) in enumerate(boundaries):
         if lower <= value < upper:
@@ -93,18 +100,11 @@ def estimate_daniel_dan(star: float) -> dict[str, Any]:
             numeric = round(11 + index + t, 2)
 
             if t < 1 / 3:
-                label = f"{dan_order[index]} Low"
+                label = f"{_display(index)} Low"
             elif t < 2 / 3:
-                label = f"{dan_order[index]} Mid"
+                label = f"{_display(index)} Mid"
             else:
-                label = f"{dan_order[index]} High"
-
-            if index == 5:
-                label = f"Emik {label}"
-            elif index == 6:
-                label = f"Thaumiel {label}"
-            elif index == 7:
-                label = f"CloverWisp {label}"
+                label = f"{_display(index)} High"
 
             return {"label": label, "numeric": numeric}
 
