@@ -8,13 +8,7 @@ from ...parser.osu_file_parser import osu_file
 
 
 def js_fixed(x: float, d: int = 2) -> float:
-    """JS ``Number(x.toFixed(d))`` 语义（平局取更大 n）。
-
-    ``Decimal(float)`` 拿到的是该 float 的精确二进制值，因此平局判断与 JS 的
-    十进制字面量直觉可能不同（例如 ``1.005`` 的二进制值略小于 1.005）。
-    已知限制：负数平局 JS 向 +∞ 取，ROUND_HALF_UP 向 +∞ 同向——一致；
-    其余个案由 golden 兜底。
-    """
+    """JS ``Number(x.toFixed(d))`` 语义（Decimal HALF_UP，平局向 +∞）。"""
     return float(Decimal(x).quantize(Decimal(1).scaleb(-d), rounding=ROUND_HALF_UP))
 
 

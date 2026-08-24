@@ -1,14 +1,7 @@
-"""Roxy RC 估计器 —— ``js/estimator/roxyEstimator.js`` 的逐段直译 (Step 7)。
+"""Roxy RC 估计器 —— ``js/estimator/roxyEstimator.js`` 的逐段直译。
 
-对照源: tosu ``ManiaMapAnalyser by Leo_Black/js/estimator/roxyEstimator.js``
-(1658 行)。数值、门控顺序、特征顺序全部以 JS 源码为准; 仅有的结构性差异:
-
-* Python 解析器 ``osu_file`` 是路径式的 (JS ``OsuFileParser`` 吃文本), 因此入口
-  把 canonicalize 后的文本写入临时 .osu 再解析, 参照估计器 (Sunny/Daniel/Azusa)
-  复用同一临时路径。JS 的 canShareParsed 共享优化留待 Step 10。
-* ``rcLabelToNumeric`` 尚无共享实现, 在本文件内私有直译 (Step 10 统一收敛)。
-
-结果 dict 的键名与 JS 完全一致 (parity harness 按键比对)。
+数值、门控顺序、特征顺序以 JS 源码为准；入口把 canonicalize 后的文本写入
+临时 .osu 再解析，参照估计器复用同一临时路径。结果 dict 键名与 JS 一致。
 """
 
 from __future__ import annotations
@@ -29,7 +22,7 @@ from ...data.roxy_meta_model import (
 from ...parser.osu_file_parser import osu_file
 from .rc import numeric_to_rc_label
 
-try:  # shared.py 由并行 worker 维护; 缺失时退回私有等价实现 (Step 10 收敛)
+try:  # shared.js_fixed 缺失时退回私有等价实现
     from .shared import js_fixed
 except ImportError:  # pragma: no cover
     from decimal import ROUND_HALF_UP, Decimal
@@ -1160,9 +1153,7 @@ def _compute_roxy_numeric(curve: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# RC 标签互转 (rcDifficultyFormat.js 私有直译; Step 10 统一收敛)
-# ---------------------------------------------------------------------------
+# RC 标签互转（rcDifficultyFormat.js 私有直译）
 
 _RC_GREEK_BASE_MAP = {
     "alpha": 11,
@@ -1344,7 +1335,7 @@ def _build_reference_predictions(
     precomputed_sunny_result: dict[str, Any] | None = None,
     precomputed_daniel_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    # JS L1167-1203 直译 (wantsGraph 恒为 False; graph 本阶段不产出)。
+    # JS L1167-1203 直译（wantsGraph 恒为 False，graph 不产出）。
     from .azusa import estimate_azusa_result
     from .daniel import estimate_daniel_result
     from .sunny import estimate_sunny_result
@@ -1817,7 +1808,7 @@ def run_roxy_estimator_from_text(
         analysis_text = timing.text
         analysis_speed_rate = timing.speed_rate
 
-        # JS 的 canShareParsed 共享解析优化留待 Step 10; 本阶段总是自建解析实例。
+        # 总是自建解析实例（未实现 JS 的 canShareParsed 共享优化）。
         cvt = _normalize_cvt_flag(cvt_flag)
 
         fd, tmp_path = tempfile.mkstemp(suffix=".osu", prefix="roxy_")

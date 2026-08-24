@@ -84,8 +84,7 @@ def _rescale_high(sr: float) -> float:
 def _preprocess_daniel(
     file_path: str, speed_rate: float, *, chart: Any = None
 ) -> dict[str, Any]:
-    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process；
-    # clone 防御，避免共享实例被下游改写。
+    # chart 非 None 时跳过解析，clone 防御。
     if chart is not None:
         p_obj = chart.clone()
     else:

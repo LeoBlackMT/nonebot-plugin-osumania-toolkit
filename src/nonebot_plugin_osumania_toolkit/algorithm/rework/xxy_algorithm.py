@@ -71,11 +71,7 @@ def step_interp(new_x, old_x, old_vals):
         old_x: 原始采样点。
         old_vals: 原始采样值。
     Returns:
-        零阶保持插值结果。
-    Note:
-        Sunny 专属（对齐 js sunnyAlgorithm.stepInterp 的
-        ``while oldX[idx+1] < x``）：精确命中时取*前一个*采样。
-        daniel 保持 side='right' 语义，勿同步过去。
+        零阶保持插值结果（精确命中取前一个采样；daniel 用 side='right' 勿混）。
     """
     # side='left' 给出第一个 >= new_x 的插入位；减一即"最后一个严格小于 new_x"的元素。
     indices = np.searchsorted(old_x, new_x, side='left') - 1
@@ -99,8 +95,7 @@ def stream_booster(delta):
 # ===== 辅助函数结束 =====
 
 def preprocess_file(file_path, speed_rate, od_flag, cvt_flag, *, chart=None):
-    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process；
-    # 下方 mod_IN/mod_HO 会改写物件结构，故防御性 clone，避免污染共享实例。
+    # chart 非 None 时跳过解析；IN/HO 会改写物件结构，故防御性 clone。
     if chart is not None:
         p_obj = chart.clone()
     else:
@@ -161,10 +156,7 @@ def preprocess_file(file_path, speed_rate, od_flag, cvt_flag, *, chart=None):
     x = 0.3 * ((64.5 - math.ceil(od * 3)) / 500)**0.5
     x = min(x, 0.6*(x-0.09)+0.09)
     note_seq.sort(key=lambda tup: (tup[1], tup[0]))
-    # D3: 对齐 js preprocessFile L194-199 —— 排序后 shift() 丢掉最早音符
-    # （cs ManiaDifficultyCalculator 的 for i=1 起点）。JS 中 shift 发生在
-    # noteSeqByColumn / lnSeq / tailSeq / lnSeqByColumn / T 等*全部*派生结构
-    # 构建之前，此处位置与其一致：后续结构均基于截断后的 note_seq。
+    # js preprocessFile：排序后 shift() 丢掉最早音符，再构建全部派生结构。
     if note_seq:
         note_seq = note_seq[1:]
 
@@ -518,9 +510,8 @@ def compute_C_and_Ks(K, T, note_seq, key_usage, base_corners):
     hi = np.searchsorted(note_hit_times, base_corners + 500, side='left')
     C_step = (hi - lo).astype(float)
 
-    # D2: C(s) V2 —— heads + LN tails（tail >= 0 才并入），对齐 js
-    # computeCAndKs 的 noteHitTimesV2 / CStepV2；窗口逻辑与原 C_step 完全一致，
-    # 仅计数集合不同。effectiveWeights 恒用 V2（js L938-940 的非 classic 分支）。
+    # C(s) V2：heads + LN tails（tail >= 0 才并入）；effectiveWeights 恒用 V2，
+    # 对应 js sunnyAlgorithm 恒为 Classic 开启的行为。
     note_hit_times_v2 = np.array(
         sorted(t for n in note_seq for t in ((n[1],) if n[2] < 0 else (n[1], n[2]))),
         dtype=float,
@@ -620,9 +611,8 @@ def calculate(
     gaps[-1] = (all_corners[-1] - all_corners[-2]) / 2.0
     gaps[1:-1] = (all_corners[2:] - all_corners[:-2]) / 2.0
 
-    # 每个角点的有效权重是密度与间隔的乘积。
-    # D2: 恒用 V2（heads+tails 计数）——js L938-940 `classicMod ? CArr : CArrV2`
-    # 的非 classic 分支；S 公式（上方）中的 C_arr 保持 heads-only 不变。
+    # 每个角点的有效权重是密度与间隔的乘积；恒用 V2（heads+tails 计数），
+    # 对应 js sunny 恒为 Classic 开启的行为。S 公式中的 C_arr 保持 heads-only。
     effective_weights = C_arr_v2 * gaps
     df_sorted = df_corners.sort_values('D')
     D_sorted = df_sorted['D'].values

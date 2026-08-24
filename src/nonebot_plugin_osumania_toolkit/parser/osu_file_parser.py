@@ -100,20 +100,7 @@ class osu_file:
         self._timing_index: list[int] = []
 
     def clone(self) -> osu_file:
-        """
-        summary:
-            复制全部实例属性，供“单次解析 + 多消费者分发”使用。
-        Args:
-            无。
-        Returns:
-            与原对象字段一致的独立实例。
-        Note:
-            容器属性一律浅拷贝：消费者对 clone 的顶层变更（``_reset_collections``
-            的 ``clear``、``mod_IN``/``mod_HO`` 的 ``append``/重绑定）不会波及
-            原对象或其它 clone；``note_times`` 的列时间列表同步复制一层，
-            防止跨消费者就地排序/追加外溢。嵌套元素（breaks 内层 list、
-            note_rows 元组等）按引用共享——现有消费者均只读嵌套元素。
-        """
+        """复制全部实例属性（容器浅拷贝），供单次解析 + 多消费者分发。"""
         dup = osu_file.__new__(osu_file)
         dup.file_path = self.file_path
         dup.assume_replay_times_scaled = self.assume_replay_times_scaled

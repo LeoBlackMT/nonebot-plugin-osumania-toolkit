@@ -19,15 +19,11 @@ class NoteType:
 
 
 def f32(value: float) -> float:
-    # 对齐 JS numberUtils.f32 / Math.fround：真实 IEEE binary32
-    # round-to-nearest-even 舍入（此前为恒等函数，导致 interludeSr ~2e-6 系统性
-    # 负偏；见 tests/golden/reports/msd_quantization.md 附录的定位实验）。
+    # JS numberUtils.f32 / Math.fround：真实 IEEE binary32 舍入。
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
-# JS 侧以 f32() 包裹的模块常量——binary32 值与 double 字面量不同,必须显式量化:
-# difficulty.js: CURVE_POWER=f32(0.6), CURVE_SCALE=f32(0.4056)
-# strain.js:     STRAIN_SCALE=f32(0.01626)
+# JS 侧经 f32() 包裹的模块常量，binary32 值与 double 字面量不同：
 _F32_CURVE_POWER = f32(0.6)
 _F32_CURVE_SCALE = f32(0.4056)
 _F32_STRAIN_SCALE = f32(0.01626)
@@ -116,7 +112,6 @@ def build_interlude_rows(
 ) -> dict[str, Any]:
     temp_path: Path | None = None
     if chart is not None:
-        # Step10 单次解析链路：clone 防御（mod_IN/mod_HO 会改写物件结构）。
         working = chart.clone()
     else:
         path = _resolve_source_path(source)

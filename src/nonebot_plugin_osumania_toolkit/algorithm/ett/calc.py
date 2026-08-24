@@ -197,12 +197,8 @@ def _map_7k_to_6k(lane: int) -> int:
     return lane - 1
 
 
-# --- compute_difficulties result cache --------------------------------------
-# Key: (chart content sha256, float(music_rate), int(keycount), score_goal,
-# runner binary sha256). The runner digest is hashed from the binary resolved
-# by _resolve_official_runner_path() (ETT_MINACALC_RUNNER override or module-
-# dir candidate) lazily once per process, so replacing the binary invalidates
-# stale entries on the next process instead of serving old numbers forever.
+# compute_difficulties 结果缓存：key 含 runner 二进制 sha256（每进程惰性求一次），
+# 换二进制即自然失效。容量 256，超限整表清空；dict 读写依赖 GIL 原子性。
 _DIFFICULTIES_CACHE_MAX_SIZE = 256
 _DIFFICULTIES_CACHE: dict[tuple[Any, ...], dict[str, float]] = {}
 _RUNNER_SHA256_CACHE: str | None = None

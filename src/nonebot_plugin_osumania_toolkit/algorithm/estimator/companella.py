@@ -207,8 +207,6 @@ def estimate_companella_result(
         interlude_star = calculate_interlude_star(source, speed_rate, cvt_flag, chart=chart)
 
     if msd_values is None:
-        # Step10 单次解析链路：clone 防御（compute_difficulties 只读，但保持
-        # 与其他消费者一致的约定）。
         chart_obj = (
             chart.clone()
             if chart is not None

@@ -1,19 +1,12 @@
-"""Mixed 估计器 —— ``js/estimator/mixedEstimator.js`` 的逐段直译 (Step 8)。
+"""Mixed 估计器 —— ``js/estimator/mixedEstimator.js`` 的逐段直译。
 
-对照源: tosu ``ManiaMapAnalyser by Leo_Black/js/estimator/mixedEstimator.js``。
-路由链与 JS 完全一致：
+路由链与 JS 一致：RC 模式先 Roxy（未开 IN 且无显式 OD 时按
+``shouldEvaluateAzusaRcPreference``/``shouldPreferAzusaRcResult`` 评估是否换路
+Azusa；Roxy 不可用走 Azusa→Daniel）；LN/Mix 保持 Sunny 组合，4K 且 star<9 时
+产出 ``mixedCompanellaPlan`` 由上层应用，否则尝试 Daniel 替换 RC 段。
 
-* RC 模式（HO 转换或 lnRatio<=0.15、4K）先试 Roxy；仅在未开 IN 且无显式 OD
-  时按 ``shouldEvaluateAzusaRcPreference`` 评估是否换路 Azusa（命中
-  ``shouldPreferAzusaRcResult`` 才替换）；Roxy 不可用且未开 IN 时走现行
-  Azusa→Daniel 链（注意此处对 Azusa 的可用性判定同样用 ``canUseRcResult``，
-  与 JS 一致）。
-* LN/Mix 模式保持 Sunny 的 RC||LN 组合：4K 且 star<9 时产出
-  ``mixedCompanellaPlan`` 由上层应用（JS app 层 ``applyCompanellaToMixedResult``
-  对应本模块同名函数 + mapview 消费分支）；否则尝试 Daniel 替换 RC 段。
-
-与 JS 的结构性差异仅一处：Python 解析器是路径式的，而 Roxy 入口吃谱面文本，
-因此 RC 分支先以 utf-8-sig 读出文本（与 ``osu_file_parser`` 同源）再调用。
+与 JS 的结构性差异仅一处：Python 解析器是路径式的，Roxy 入口吃谱面文本，
+RC 分支先以 utf-8-sig 读出文本再调用。
 """
 
 from __future__ import annotations
@@ -249,9 +242,7 @@ def _try_run_roxy_fallback(
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    # 已知限制（Step10 单次解析链路）：Roxy 入口吃谱面文本（roxy.py 本阶段
-    # 不动），无法直接消费 osu_file——即使上游持有已解析 chart，此分支仍按
-    # 文本路径重读文件并自建解析实例。
+    # Roxy 入口吃谱面文本，此分支始终按文本路径自建解析。
     try:
         from .roxy import run_roxy_estimator_from_text
 

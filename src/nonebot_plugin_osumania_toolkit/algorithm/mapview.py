@@ -126,7 +126,7 @@ async def analyze_mapview_chart(
         except Exception as e:
             raise ParseError(f".mc 转 .osu 失败: {e}") from e
 
-    # Step10 单次解析：整条链路只 process 一次，各消费者拿 clone。
+    # 单次解析，各消费者拿 clone。
     try:
         base_chart = await asyncio.to_thread(load_osu_chart, str(target_file))
     except ParseError as e:

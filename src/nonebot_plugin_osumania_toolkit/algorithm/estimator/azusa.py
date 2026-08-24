@@ -445,8 +445,6 @@ def estimate_azusa_result(
     with_graph: bool = False, force_sunny_reference_ho: bool = True,
     chart: Any = None,
 ) -> dict[str, Any]:
-    # Step10 单次解析链路：chart 非 None 时跳过路径解析+process（clone 防御，
-    # 避免共享实例被本函数或下游参照调用突变）。局部变量相应更名 chart_obj。
     if chart is not None:
         chart_obj = chart.clone()
     else:

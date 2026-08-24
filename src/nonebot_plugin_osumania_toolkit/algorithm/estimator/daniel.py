@@ -19,7 +19,6 @@ def estimate_daniel_result(
     chart: Any = None,
 ) -> dict[str, Any]:
     if chart is not None:
-        # Step10 单次解析链路：跳过路径解析+process（底层 clone 防御）。
         daniel_raw = calculate_daniel(
             source, speed_rate, od_flag, with_graph=False, chart=chart
         )
