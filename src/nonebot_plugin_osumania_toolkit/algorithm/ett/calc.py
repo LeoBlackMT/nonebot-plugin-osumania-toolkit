@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import subprocess
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 OUTPUT_SKILLSETS = [
     "Stream",
@@ -196,7 +197,92 @@ def _map_7k_to_6k(lane: int) -> int:
     return lane - 1
 
 
+# --- compute_difficulties result cache --------------------------------------
+# Key: (chart content sha256, float(music_rate), int(keycount), score_goal,
+# runner binary sha256). The runner digest is hashed from the binary resolved
+# by _resolve_official_runner_path() (ETT_MINACALC_RUNNER override or module-
+# dir candidate) lazily once per process, so replacing the binary invalidates
+# stale entries on the next process instead of serving old numbers forever.
+_DIFFICULTIES_CACHE_MAX_SIZE = 256
+_DIFFICULTIES_CACHE: dict[tuple[Any, ...], dict[str, float]] = {}
+_RUNNER_SHA256_CACHE: str | None = None
+
+
+def _chart_content_fingerprint(osu_obj) -> str:
+    payload = repr([
+        list(osu_obj.columns),
+        list(osu_obj.note_starts),
+        list(osu_obj.note_ends),
+        list(osu_obj.timing_points),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _get_runner_sha256() -> str:
+    global _RUNNER_SHA256_CACHE
+    if _RUNNER_SHA256_CACHE is None:
+        runner_path = _resolve_official_runner_path()
+        _RUNNER_SHA256_CACHE = hashlib.sha256(
+            runner_path.read_bytes()
+        ).hexdigest()
+    return _RUNNER_SHA256_CACHE
+
+
+def _build_difficulties_cache_key(
+    osu_obj,
+    music_rate: float,
+    keycount: int,
+    score_goal: float,
+) -> tuple[Any, ...]:
+    return (
+        _chart_content_fingerprint(osu_obj),
+        float(music_rate),
+        int(keycount),
+        score_goal,
+        _get_runner_sha256(),
+    )
+
+
+def _difficulties_cache_get(key: tuple[Any, ...]) -> dict[str, float] | None:
+    # Plain dict get/set relies on GIL atomicity; under concurrent access the
+    # worst case is one redundant computation of the same key.
+    return _DIFFICULTIES_CACHE.get(key)
+
+
+def _difficulties_cache_put(
+    key: tuple[Any, ...], value: dict[str, float]
+) -> None:
+    # Capacity guard: clear the whole table on overflow. LRU upgrade path:
+    # swap in an OrderedDict + move_to_end policy if partial eviction or
+    # hit-rate preservation ever becomes necessary.
+    if len(_DIFFICULTIES_CACHE) >= _DIFFICULTIES_CACHE_MAX_SIZE:
+        _DIFFICULTIES_CACHE.clear()
+    _DIFFICULTIES_CACHE[key] = dict(value)
+
+
 def compute_difficulties(
+    osu_obj,
+    music_rate: float = 1.0,
+    keycount: int = 7,
+    score_goal: float = 0.93,
+) -> dict[str, float]:
+    cache_key = _build_difficulties_cache_key(
+        osu_obj, music_rate, keycount, score_goal
+    )
+    cached = _difficulties_cache_get(cache_key)
+    if cached is not None:
+        # Cache hit: fully bypasses the subprocess runner call.
+        return dict(cached)
+
+    result = _compute_difficulties_uncached(
+        osu_obj, music_rate, keycount, score_goal
+    )
+    # Only successful dict returns reach this line; raised errors are not cached.
+    _difficulties_cache_put(cache_key, result)
+    return result
+
+
+def _compute_difficulties_uncached(
     osu_obj,
     music_rate: float = 1.0,
     keycount: int = 7,
