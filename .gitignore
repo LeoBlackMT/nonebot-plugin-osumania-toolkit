@@ -165,4 +165,6 @@ cython_debug/
 /samples
 /backup
 /temp
+/.omo
+/samples
 AGENTS.md

@@ -1,63 +1,86 @@
+"""Matching helpers — ported from YAVSRG Interlude Events.fs / HitMechanics.fs."""
 from __future__ import annotations
 
 import bisect
-from collections import deque
+import lzma
+import struct
 from dataclasses import dataclass
 from typing import Any, Optional
-
-from nonebot.log import logger
 
 from ...parser.osr_file_parser import osr_file
 from ...parser.osu_file_parser import NOTE_HOLD_HEAD, NOTE_HOLD_TAIL, NOTE_NORMAL, osu_file
 
-# 参考实现路径：
-# - YAVSRG/prelude/src/Gameplay/Scoring/HitMechanics.fs
-# - YAVSRG/prelude/src/Gameplay/Scoring/Scoring.fs
-# - YAVSRG/prelude/src/Gameplay/Scoring/Events.fs
-# - osu.Game/Rulesets/UI/ReplayRecorder.cs
-# - osu.Game.Rulesets.Osu/Replays/OsuAutoGeneratorBase.cs
-
 NOTE_KIND_ANY = 0
 HIT_REQUIRED = "HIT_REQUIRED"
+HIT_HOLD_REQUIRED = "HIT_HOLD_REQUIRED"
 HIT_ACCEPTED = "HIT_ACCEPTED"
 RELEASE_REQUIRED = "RELEASE_REQUIRED"
 RELEASE_ACCEPTED = "RELEASE_ACCEPTED"
-MISS = "MISS"
-DROP_HOLD = "DROP_HOLD"
 
 FOUND = "FOUND"
 BLOCKED = "BLOCKED"
 NOTFOUND = "NOTFOUND"
 
+# HoldStateInternal (Events.fs)
+H_NOTHING = "H_NOTHING"
+H_HOLDING = "H_HOLDING"
+H_DROPPED = "H_DROPPED"
+H_REGRABBED = "H_REGRABBED"
+H_MISSED_HEAD_DROPPED = "H_MISSED_HEAD_DROPPED"
+H_MISSED_HEAD_REGRABBED = "H_MISSED_HEAD_REGRABBED"
+
+_IS_DROPPED = frozenset({H_DROPPED, H_REGRABBED, H_MISSED_HEAD_DROPPED, H_MISSED_HEAD_REGRABBED})
+_IS_MISSED_HEAD = frozenset({H_MISSED_HEAD_DROPPED, H_MISSED_HEAD_REGRABBED})
+
+
+def f32(value: float) -> float:
+    """IEEE-754 binary32 round trip (F# float32 semantics)."""
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+def f32div(a: float, b: float) -> float:
+    """float32 division (F# `delta / rate` stays in float32)."""
+    import numpy as np
+
+    return float(np.float32(np.float32(a) / np.float32(b)))
+
 
 @dataclass(slots=True)
 class NoteEntry:
     index: int
+    row_index: int
     time_ms: float
     column: int
     note_kind: int
-    note_start: float
-    note_end: float
     status: str
     tail_index: Optional[int] = None
     head_index: Optional[int] = None
-    press_time: Optional[float] = None
-    release_time: Optional[float] = None
     delta: Optional[float] = None
     head_delta: Optional[float] = None
     tail_delta: Optional[float] = None
+    press_time: Optional[float] = None
+    release_time: Optional[float] = None
     hold_state: Optional[str] = None
-    blocked: bool = False
     matched: bool = False
     judgement_index: Optional[int] = None
+    note_start: float = 0.0
+    note_end: float = 0.0
+    blocked: bool = False
 
 
 @dataclass(slots=True)
 class HoldState:
-    active: bool = False
+    state: str = H_NOTHING
     head_index: Optional[int] = None
     tail_index: Optional[int] = None
-    press_time: Optional[float] = None
+
+    @property
+    def IsDropped(self) -> bool:
+        return self.state in _IS_DROPPED
+
+    @property
+    def MissedHead(self) -> bool:
+        return self.state in _IS_MISSED_HEAD
 
 
 def _empty_result(status: str, error: Optional[str], meta: Optional[dict[str, Any]] = None) -> dict:
@@ -65,6 +88,7 @@ def _empty_result(status: str, error: Optional[str], meta: Optional[dict[str, An
         "status": status,
         "error": error,
         "matched_events": [],
+        "events_f": [],
         "offset_vector": [],
         "delta_list": [],
         "matched_pairs": [],
@@ -78,7 +102,7 @@ def _empty_result(status: str, error: Optional[str], meta: Optional[dict[str, An
             "scale_applied": False,
             "chart_time_offset": 0.0,
             "note_priority": "OsuMania",
-            "algorithm_version": "interlude_v1",
+            "algorithm_version": "interlude_v2",
         },
     }
 
@@ -105,364 +129,58 @@ def _determine_speed_factor(osr: osr_file) -> float:
     return 1.0
 
 
-def _resolve_scale_decision(speed_factor: float, assume_replay_times_scaled: Optional[bool]) -> bool:
-    if assume_replay_times_scaled is True:
-        return True
-    if assume_replay_times_scaled is False:
-        return False
-    return speed_factor != 1.0
-
-
-def _apply_time_scaling(
-    events: list[tuple[int, float]],
-    replay_data: list[tuple[float, int]],
-    *,
-    scale: bool,
-    speed_factor: float,
-    rate: float,
-) -> tuple[list[tuple[int, float]], list[tuple[float, int]], bool]:
-    applied = False
-
-    if scale and speed_factor not in (0.0, 1.0):
-        events = [(col, float(t) / speed_factor) for col, t in events]
-        replay_data = [(float(t) / speed_factor, mask) for t, mask in replay_data]
-        applied = True
-
-    if rate > 0 and abs(rate - 1.0) > 1e-9:
-        events = [(col, float(t) / rate) for col, t in events]
-        replay_data = [(float(t) / rate, mask) for t, mask in replay_data]
-
-    return events, replay_data, applied
-
-
-def _select_press_and_replay_stream(
-    osr: osr_file,
-    *,
-    use_chart_time: bool,
-    assume_replay_times_scaled: Optional[bool],
-    rate: float,
-) -> tuple[list[tuple[int, float]], list[tuple[float, int]], float, bool]:
-    speed_factor = _determine_speed_factor(osr)
-
-    chart_events = getattr(osr, "press_events_chart_float", None) or getattr(osr, "press_events_chart", None)
-    chart_replay = getattr(osr, "replay_data_chart", None)
-
-    real_events = (
-        getattr(osr, "press_events_real_float", None)
-        or getattr(osr, "press_events_real", None)
-        or getattr(osr, "press_events_float", None)
-        or getattr(osr, "press_events", None)
-        or []
-    )
-    real_replay = getattr(osr, "replay_data_real", None) or []
-
-    if use_chart_time and (chart_events or chart_replay):
-        events = [(int(col), float(t)) for col, t in (chart_events or [])]
-        replay_data = [(float(t), int(mask)) for t, mask in (chart_replay or [])]
-        if rate > 0 and abs(rate - 1.0) > 1e-9:
-            events = [(col, t / rate) for col, t in events]
-            replay_data = [(t / rate, mask) for t, mask in replay_data]
-        scale_applied = bool(getattr(osr, "scale_applied", speed_factor != 1.0))
-        return events, replay_data, speed_factor, scale_applied
-
-    events = [(int(col), float(t)) for col, t in real_events]
-    replay_data = [(float(t), int(mask)) for t, mask in real_replay]
-
-    if use_chart_time:
-        scale = _resolve_scale_decision(speed_factor, assume_replay_times_scaled)
-    else:
-        scale = False
-
-    events, replay_data, scale_applied = _apply_time_scaling(
-        events,
-        replay_data,
-        scale=scale,
-        speed_factor=speed_factor,
-        rate=rate,
-    )
-    return events, replay_data, speed_factor, scale_applied
-
-
-def _nearest_note_distance(note_times: list[float], time_value: float) -> float:
-    if not note_times:
-        return float("inf")
-
-    idx = bisect.bisect_left(note_times, time_value)
-    best = float("inf")
-    if idx < len(note_times):
-        best = abs(note_times[idx] - time_value)
-    if idx > 0:
-        best = min(best, abs(note_times[idx - 1] - time_value))
-    return best
-
-
-def _nearest_note_time(note_times: list[float], time_value: float) -> Optional[float]:
-    if not note_times:
-        return None
-
-    idx = bisect.bisect_left(note_times, time_value)
-    candidates: list[float] = []
-    if idx < len(note_times):
-        candidates.append(note_times[idx])
-    if idx > 0:
-        candidates.append(note_times[idx - 1])
-    if not candidates:
-        return None
-    return min(candidates, key=lambda t: abs(t - time_value))
-
-
-def _offset_match_score_by_column(
-    *,
-    press_events: list[tuple[int, float]],
-    note_times_by_col: dict[int, list[float]],
-    offset: float,
-    hit_window: float = 180.0,
-    sample_limit: int = 2048,
-) -> tuple[int, float]:
-    matched = 0
-    abs_delta_sum = 0.0
-
-    for col, press_time in press_events[:sample_limit]:
-        note_times = note_times_by_col.get(int(col), [])
-        if not note_times:
-            continue
-
-        nearest = _nearest_note_time(note_times, float(press_time) + offset)
-        if nearest is None:
-            continue
-
-        delta = float(press_time) + offset - nearest
-        if -hit_window <= delta <= hit_window:
-            matched += 1
-            abs_delta_sum += abs(delta)
-
-    if matched <= 0:
-        return 0, float("inf")
-    return matched, abs_delta_sum / matched
-
-
-def _estimate_chart_time_offset(
-    *,
-    osu: osu_file,
-    press_events: list[tuple[int, float]],
-    replay_data: list[tuple[float, int]],
-    use_chart_time: bool,
-) -> float:
-    """
-    估计是否需要把 replay 的 chart_time 平移到谱面绝对时间轴。
-
-    参考 prelude：ReplayFrame 的 ChartTime 相对 first_note，匹配时使用 first_note + chart_time。
-    若输入已是绝对时间，平移会显著变差，因此通过最邻近音符距离做双候选评分（0 与 first_note）。
-    """
-    if not use_chart_time:
-        return 0.0
-
-    note_times: list[float] = []
-    if hasattr(osu, "note_rows") and isinstance(getattr(osu, "note_rows"), list):
-        note_times = sorted(float(t) for t, _ in getattr(osu, "note_rows") if isinstance(t, (int, float)))
-    elif hasattr(osu, "note_starts") and isinstance(getattr(osu, "note_starts"), list):
-        note_times = sorted(float(t) for t in getattr(osu, "note_starts") if isinstance(t, (int, float)))
-
-    if not note_times:
-        return 0.0
-
-    first_note = float(note_times[0])
-    if first_note <= 1.0:
-        return 0.0
-
-    sample_times = [float(t) for _, t in press_events[:256]] if press_events else []
-    if not sample_times:
-        sample_times = [float(t) for t, _ in replay_data[:256]]
-
-    if len(sample_times) < 8:
-        return 0.0
-
-    note_times_by_col: dict[int, list[float]] = {}
-    raw_note_times = getattr(osu, "note_times", None)
-    if isinstance(raw_note_times, dict):
-        for col_raw, times_raw in raw_note_times.items():
-            if not isinstance(col_raw, int):
-                continue
-            if not isinstance(times_raw, list):
-                continue
-            cleaned = sorted(float(t) for t in times_raw if isinstance(t, (int, float)))
-            if cleaned:
-                note_times_by_col[col_raw] = cleaned
-
-    # 先用按列命中潜力比较两个候选偏移（0 与 first_note），避免仅按最近距离导致误判。
-    if press_events and note_times_by_col:
-        base_match, base_mad = _offset_match_score_by_column(
-            press_events=press_events,
-            note_times_by_col=note_times_by_col,
-            offset=0.0,
-        )
-        shifted_match, shifted_mad = _offset_match_score_by_column(
-            press_events=press_events,
-            note_times_by_col=note_times_by_col,
-            offset=first_note,
-        )
-
-        sample_n = min(len(press_events), 2048)
-        improve_threshold = max(8, int(sample_n * 0.01))
-        if shifted_match >= base_match + improve_threshold and shifted_mad <= base_mad + 8.0:
-            return first_note
-        return 0.0
-
-    def score(offset: float) -> float:
-        distances = [_nearest_note_distance(note_times, t + offset) for t in sample_times]
-        return float(sum(distances) / max(1, len(distances)))
-
-    base_score = score(0.0)
-    shifted_score = score(first_note)
-
-    # 只有当平移显著改善时才应用，避免破坏本来已在绝对时间轴的数据。
-    if shifted_score + 20.0 < base_score and shifted_score <= base_score * 0.75:
-        return first_note
-    return 0.0
-
-
-def _build_hitflagdata(osu: osu_file) -> tuple[list[NoteEntry], dict[int, list[int]], dict[int, list[int]], int]:
-    if hasattr(osu, "to_TimeArray"):
-        time_array = osu.to_TimeArray()
-    elif hasattr(osu, "note_rows"):
-        time_array = list(getattr(osu, "note_rows") or [])
-    else:
-        return [], {}, {}, 0
-
-    keys = int(getattr(osu, "column_count", 0) or 0)
-    if keys <= 0:
-        return [], {}, {}, 0
-
-    notes: list[NoteEntry] = []
-    pending_heads: dict[int, deque[int]] = {col: deque() for col in range(keys)}
-
-    for time_ms, row in sorted(time_array, key=lambda item: float(item[0])):
-        t = float(time_ms)
-        if not isinstance(row, list):
-            continue
-
-        limit = min(keys, len(row))
-        for col in range(limit):
-            note_kind = int(row[col] or 0)
-            if note_kind == 0:
-                continue
-
-            if note_kind == NOTE_NORMAL:
-                notes.append(
-                    NoteEntry(
-                        index=len(notes),
-                        time_ms=t,
-                        column=col,
-                        note_kind=NOTE_NORMAL,
-                        note_start=t,
-                        note_end=t,
-                        status=HIT_REQUIRED,
-                    )
-                )
-            elif note_kind == NOTE_HOLD_HEAD:
-                idx = len(notes)
-                notes.append(
-                    NoteEntry(
-                        index=idx,
-                        time_ms=t,
-                        column=col,
-                        note_kind=NOTE_HOLD_HEAD,
-                        note_start=t,
-                        note_end=t,
-                        status=HIT_REQUIRED,
-                    )
-                )
-                pending_heads[col].append(idx)
-            elif note_kind == NOTE_HOLD_TAIL:
-                idx = len(notes)
-                notes.append(
-                    NoteEntry(
-                        index=idx,
-                        time_ms=t,
-                        column=col,
-                        note_kind=NOTE_HOLD_TAIL,
-                        note_start=t,
-                        note_end=t,
-                        status=RELEASE_REQUIRED,
-                    )
-                )
-                if pending_heads[col]:
-                    head_idx = pending_heads[col].popleft()
-                    notes[head_idx].tail_index = idx
-                    notes[head_idx].note_end = t
-                    notes[idx].head_index = head_idx
-                    notes[idx].note_start = notes[head_idx].time_ms
-
-    notes_by_col: dict[int, list[int]] = {col: [] for col in range(keys)}
-    tails_by_col: dict[int, list[int]] = {col: [] for col in range(keys)}
-
-    for note in notes:
-        if note.note_kind == NOTE_HOLD_TAIL:
-            tails_by_col[note.column].append(note.index)
-        else:
-            notes_by_col[note.column].append(note.index)
-
-    return notes, notes_by_col, tails_by_col, keys
-
-
-def _extract_note_windows(ruleset_data: dict[str, Any]) -> tuple[float, float, list[tuple[int, float, float]], bool]:
+def _note_windows(ruleset_data: dict[str, Any]) -> tuple[float, float, list[tuple[int, float, float]], bool]:
+    judgements = ruleset_data.get("Judgements", []) or []
     judgement_windows: list[tuple[int, float, float]] = []
-    has_any_window = False
 
-    for idx, judgement in enumerate(ruleset_data.get("Judgements", []) or []):
+    for idx, judgement in enumerate(judgements):
         if not isinstance(judgement, dict):
             continue
         tw = judgement.get("TimingWindows")
-        if tw is None:
-            continue
         if not isinstance(tw, list) or len(tw) != 2:
             continue
-        early, late = tw[0], tw[1]
-        if not _is_number(early) or not _is_number(late):
+        if not _is_number(tw[0]) or not _is_number(tw[1]):
             continue
-        early_f = float(early)
-        late_f = float(late)
-        judgement_windows.append((idx, early_f, late_f))
-        has_any_window = True
+        judgement_windows.append((idx, float(tw[0]), float(tw[1])))
 
-    if judgement_windows:
-        early_note = min(w[1] for w in judgement_windows)
-        late_note = max(w[2] for w in judgement_windows)
-        return early_note, late_note, judgement_windows, has_any_window
+    # Ruleset.NoteWindows: last judgement with a window (loosest); fallback (0, 0)
+    for idx in reversed(range(len(judgements))):
+        item = judgements[idx]
+        if not isinstance(item, dict):
+            continue
+        tw = item.get("TimingWindows")
+        if isinstance(tw, list) and len(tw) == 2 and _is_number(tw[0]) and _is_number(tw[1]):
+            return float(tw[0]), float(tw[1]), judgement_windows, bool(judgement_windows)
 
-    # 无窗口时仍可匹配：给一个保守默认窗口并记录 warning。
-    logger.warning("ruleset 未提供可用 TimingWindows，使用默认窗口 [-120, 120] ms")
-    return -120.0, 120.0, [], False
+    return 0.0, 0.0, judgement_windows, bool(judgement_windows)
 
 
-def _extract_release_windows(
+def _release_windows(
     ruleset_data: dict[str, Any],
-    *,
-    default_early: float,
-    default_late: float,
+    note_early: float,
+    note_late: float,
 ) -> tuple[float, float]:
+    """Ruleset.ReleaseWindows (Rulesets.fs), f32 faithful."""
     hold_mechanics = ruleset_data.get("HoldMechanics")
     if not isinstance(hold_mechanics, dict) or len(hold_mechanics) != 1:
-        return default_early, default_late
+        return note_early, note_late
 
     variant, payload = next(iter(hold_mechanics.items()))
+
+    if variant == "OnlyRequireHold" and _is_number(payload):
+        w = float(payload)
+        return -w, w
 
     if variant == "JudgeReleasesSeparately" and isinstance(payload, list) and len(payload) == 2:
         windows = payload[0]
         if isinstance(windows, list):
-            pairs: list[tuple[float, float]] = []
-            for item in windows:
+            for item in reversed(windows):
                 if isinstance(item, list) and len(item) == 2 and _is_number(item[0]) and _is_number(item[1]):
-                    pairs.append((float(item[0]), float(item[1])))
-            if pairs:
-                return min(p[0] for p in pairs), max(p[1] for p in pairs)
+                    return float(item[0]), float(item[1])
+        return 0.0, 0.0
 
-    if variant == "OnlyJudgeReleases" and isinstance(payload, int):
-        judgements = ruleset_data.get("Judgements", []) or []
-        if 0 <= payload < len(judgements):
-            tw = judgements[payload].get("TimingWindows") if isinstance(judgements[payload], dict) else None
-            if isinstance(tw, list) and len(tw) == 2 and _is_number(tw[0]) and _is_number(tw[1]):
-                return float(tw[0]), float(tw[1])
+    if variant == "OnlyJudgeReleases":
+        return note_early, note_late
 
     if variant == "CombineHeadAndTail" and isinstance(payload, dict) and len(payload) == 1:
         sub_variant, sub_payload = next(iter(payload.items()))
@@ -470,19 +188,16 @@ def _extract_release_windows(
             if _is_number(sub_payload[0]) and _is_number(sub_payload[1]):
                 return float(sub_payload[0]), float(sub_payload[1])
         if sub_variant == "OsuMania" and isinstance(sub_payload, dict):
-            window0 = sub_payload.get("Window0")
-            if _is_number(window0):
-                w = abs(float(window0))
-                return -w, w
+            w0 = sub_payload.get("Window0")
+            w100 = sub_payload.get("Window100")
+            if _is_number(w0) and _is_number(w100):
+                return -abs(float(w0)), f32(f32(float(w100)) - 1.0)
+            return 0.0, 0.0
 
-    if variant == "OnlyRequireHold" and _is_number(payload):
-        hold_required = abs(float(payload))
-        return min(default_early, -hold_required), max(default_late, hold_required)
-
-    return default_early, default_late
+    return note_early, note_late
 
 
-def _extract_release_judgement_windows(
+def _release_judgement_windows(
     ruleset_data: dict[str, Any],
     default_windows: list[tuple[int, float, float]],
 ) -> list[tuple[int, float, float]]:
@@ -516,79 +231,280 @@ def _infer_judgement_index(delta: float, windows: list[tuple[int, float, float]]
     return None
 
 
-def _build_replay_input_events(
-    *,
-    replay_data: list[tuple[float, int]],
-    press_events: list[tuple[int, float]],
-    keys: int,
-    mirror: bool,
-) -> list[tuple[float, int, str]]:
+def _build_hitflagdata(osu: osu_file, mirror: bool = False) -> tuple[list[NoteEntry], dict[int, list[int]], dict[int, list[int]], int, list[float]]:
+    """Build per-(row, column) note entries, mirroring columns when the replay used MR."""
+    if hasattr(osu, "to_TimeArray"):
+        time_array = osu.to_TimeArray()
+    elif hasattr(osu, "note_rows"):
+        time_array = list(getattr(osu, "note_rows") or [])
+    else:
+        return [], {}, {}, 0, []
+
+    keys = int(getattr(osu, "column_count", 0) or 0)
+    if keys <= 0:
+        return [], {}, {}, 0, []
+
     def map_col(col: int) -> Optional[int]:
         mapped = (keys - 1 - col) if mirror else col
-        if 0 <= mapped < keys:
-            return mapped
-        return None
+        return mapped if 0 <= mapped < keys else None
 
-    events: list[tuple[float, int, str]] = []
-    built_from_replay = False
+    row_index_of: dict[float, int] = {}
+    notes: list[NoteEntry] = []
+    pending_heads: dict[int, list[int]] = {col: [] for col in range(keys)}
+    row_times: list[float] = []
 
-    if replay_data:
-        built_from_replay = True
-        prev_mask = 0
+    for time_ms, row in sorted(time_array, key=lambda item: float(item[0])):
+        t = float(time_ms)
+        if not isinstance(row, list):
+            continue
+        if t not in row_index_of:
+            row_index_of[t] = len(row_times)
+            row_times.append(t)
+        row_idx = row_index_of[t]
 
-        replay_rows = list(replay_data)
-        if any(replay_rows[i][0] > replay_rows[i + 1][0] for i in range(len(replay_rows) - 1)):
-            # 仅在明显乱序时做稳定排序；同时间戳保持原始顺序，避免引入额外边沿。
-            replay_rows = [
-                item
-                for _, item in sorted(
-                    enumerate(replay_rows),
-                    key=lambda pair: (float(pair[1][0]), pair[0]),
-                )
-            ]
-
-        for time_ms, mask in replay_rows:
-            now = int(mask)
-            changed = prev_mask ^ now
-            if changed == 0:
-                prev_mask = now
+        limit = min(keys, len(row))
+        # 行内按映射后列升序产出（mirror 时原始列逆序映射），使行内事件顺序与 F# 逐列升序一致
+        for mapped in range(keys):
+            col = (keys - 1 - mapped) if mirror else mapped
+            if col >= limit:
                 continue
-
-            # 与 prelude ReplayConsumer 对齐：按列递增逐列处理，
-            # 每列先判定是否 keyup，否则判定 keydown。
-            bit_limit = max(keys, 18)
-            for col in range(bit_limit):
-                bit = 1 << col
-                if (changed & bit) == 0:
-                    continue
-                mapped = map_col(col)
-                if mapped is None:
-                    continue
-
-                prev_down = (prev_mask & bit) != 0
-                now_down = (now & bit) != 0
-                if prev_down and not now_down:
-                    events.append((float(time_ms), mapped, "up"))
-                elif now_down and not prev_down:
-                    events.append((float(time_ms), mapped, "down"))
-
-            prev_mask = now
-
-    if not events:
-        for col, t in sorted(press_events, key=lambda item: (float(item[1]), int(item[0]))):
-            mapped = map_col(int(col))
+            note_kind = int(row[col] or 0)
+            if note_kind == 0:
+                continue
+            mapped = map_col(col)
             if mapped is None:
                 continue
-            events.append((float(t), mapped, "down"))
 
-    # replay 帧分支必须保序（同时刻多帧会影响边沿语义）；press 兜底分支可按时间排序。
-    if not built_from_replay:
-        order = {"up": 0, "down": 1}
-        events.sort(key=lambda item: (item[0], order.get(item[2], 9), item[1]))
-    return events
+            if note_kind == NOTE_NORMAL:
+                notes.append(
+                    NoteEntry(
+                        index=len(notes),
+                        row_index=row_idx,
+                        time_ms=t,
+                        column=mapped,
+                        note_kind=NOTE_NORMAL,
+                        status=HIT_REQUIRED,
+                        note_start=t,
+                        note_end=t,
+                    )
+                )
+            elif note_kind == NOTE_HOLD_HEAD:
+                idx = len(notes)
+                notes.append(
+                    NoteEntry(
+                        index=idx,
+                        row_index=row_idx,
+                        time_ms=t,
+                        column=mapped,
+                        note_kind=NOTE_HOLD_HEAD,
+                        status=HIT_HOLD_REQUIRED,
+                        note_start=t,
+                        note_end=t,
+                    )
+                )
+                pending_heads[mapped].append(idx)
+            elif note_kind == NOTE_HOLD_TAIL:
+                idx = len(notes)
+                notes.append(
+                    NoteEntry(
+                        index=idx,
+                        row_index=row_idx,
+                        time_ms=t,
+                        column=mapped,
+                        note_kind=NOTE_HOLD_TAIL,
+                        status=RELEASE_REQUIRED,
+                        note_start=t,
+                        note_end=t,
+                    )
+                )
+                if pending_heads[mapped]:
+                    head_idx = pending_heads[mapped].pop(0)
+                    notes[head_idx].tail_index = idx
+                    notes[head_idx].note_end = t
+                    notes[idx].head_index = head_idx
+                    notes[idx].note_start = notes[head_idx].time_ms
+
+    notes_by_col: dict[int, list[int]] = {col: [] for col in range(keys)}
+    tails_by_col: dict[int, list[int]] = {col: [] for col in range(keys)}
+
+    for note in notes:
+        if note.note_kind == NOTE_HOLD_TAIL:
+            tails_by_col[note.column].append(note.index)
+        else:
+            notes_by_col[note.column].append(note.index)
+
+    return notes, notes_by_col, tails_by_col, keys, row_times
 
 
-def _build_event_dict(
+def _retime_frames(
+    osr: osr_file,
+    first_note: float,
+    source_rate: float,
+) -> list[tuple[float, int]]:
+    """Rebuild replay frames as chart-relative ms with F# decode semantics.
+
+    osu! .osr payload deltas are accumulated in float32; only frames whose
+    key state changed are emitted; times are (t - first_note) * source_rate.
+    """
+    compressed = getattr(osr, "compressed_data", None)
+    if not compressed:
+        return []
+
+    try:
+        text = lzma.decompress(compressed).decode("ascii", "ignore")
+    except Exception:
+        return []
+
+    t = 0.0
+    last_state = 256
+    first_f32 = f32(first_note)
+    rate_f = f32(source_rate)
+    frames: list[tuple[float, int]] = []
+    for entry in text.split(","):
+        parts = entry.split("|")
+        if len(parts) < 2 or parts[0] == "-12345":
+            continue
+        t = f32(t + f32(float(parts[0])))
+        state = int(parts[1])
+        if state != last_state:
+            frames.append((f32(f32(t - first_f32) * rate_f), state))
+            last_state = state
+    return frames
+
+
+def _hitmechanics_interlude(
+    *,
+    now: float,
+    col: int,
+    note_indices: list[int],
+    start_index: int,
+    notes: list[NoteEntry],
+    early_window: float,
+    late_window: float,
+    cbrush_window: float,
+    cbrush_raw: float,
+) -> tuple[str, Optional[int], Optional[float]]:
+    """HitMechanics.interlude (HitMechanics.fs) verbatim."""
+    end_of_window = f32(now - early_window)
+    closest_bad_delta = late_window
+    closest_note_index = -1
+    closest_note_delta = late_window
+
+    i = start_index
+    while i < len(note_indices):
+        note_idx = note_indices[i]
+        note = notes[note_idx]
+        if note.time_ms > end_of_window:
+            break
+
+        delta = f32(now - f32(note.time_ms))
+
+        if note.status in (HIT_REQUIRED, HIT_HOLD_REQUIRED):
+            if closest_note_index < 0 or abs(closest_note_delta) > abs(delta):
+                closest_note_index = note_idx
+                closest_note_delta = delta
+            if abs(closest_note_delta) < cbrush_window:
+                i = len(note_indices)
+        elif note.status == HIT_ACCEPTED and note.delta is not None and note.delta <= f32(-cbrush_raw):
+            if abs(closest_bad_delta) > abs(delta):
+                closest_bad_delta = delta
+
+        i += 1
+
+    if closest_note_index >= 0:
+        if abs(closest_bad_delta) < abs(closest_note_delta):
+            return BLOCKED, None, None
+        return FOUND, closest_note_index, closest_note_delta
+    return NOTFOUND, None, None
+
+
+def _hitmechanics_etterna(
+    *,
+    now: float,
+    note_indices: list[int],
+    start_index: int,
+    notes: list[NoteEntry],
+    early_window: float,
+    late_window: float,
+) -> tuple[str, Optional[int], Optional[float]]:
+    """HitMechanics.etterna (HitMechanics.fs) verbatim."""
+    end_of_window = f32(now - early_window)
+    closest_note_index = -1
+    closest_note_delta = 0.0
+
+    i = start_index
+    while i < len(note_indices):
+        note_idx = note_indices[i]
+        note = notes[note_idx]
+        if note.time_ms > end_of_window:
+            break
+
+        delta = f32(now - f32(note.time_ms))
+        if note.status in (HIT_REQUIRED, HIT_HOLD_REQUIRED):
+            if closest_note_index < 0 or abs(closest_note_delta) > abs(delta):
+                closest_note_index = note_idx
+                closest_note_delta = delta
+        i += 1
+
+    if closest_note_index >= 0:
+        return FOUND, closest_note_index, closest_note_delta
+    return NOTFOUND, None, None
+
+
+def _hitmechanics_osumania(
+    *,
+    now: float,
+    note_indices: list[int],
+    start_index: int,
+    notes: list[NoteEntry],
+    early_window: float,
+    late_window: float,
+) -> tuple[str, Optional[int], Optional[float]]:
+    """HitMechanics.osu_mania (HitMechanics.fs) verbatim."""
+    end_of_window = f32(now - early_window)
+    candidate_note_index = -1
+    candidate_note_delta = 0.0
+    blocked = False
+
+    i = start_index
+    while i < len(note_indices):
+        note_idx = note_indices[i]
+        note = notes[note_idx]
+        if note.time_ms > end_of_window:
+            break
+
+        delta = f32(now - f32(note.time_ms))
+        if note.status == HIT_ACCEPTED and delta < 0.0:
+            blocked = True
+            i = len(note_indices)
+
+        if note.status in (HIT_REQUIRED, HIT_HOLD_REQUIRED):
+            candidate_note_index = note_idx
+            candidate_note_delta = delta
+            i = len(note_indices)
+
+        i += 1
+
+    if blocked:
+        return BLOCKED, None, None
+    if candidate_note_index >= 0:
+        return FOUND, candidate_note_index, candidate_note_delta
+    return NOTFOUND, None, None
+
+
+def _first_tail_at_or_after(tails: list[int], notes: list[NoteEntry], target_index: int) -> int:
+    """Earliest tail note index >= target_index (F# row scan equivalent)."""
+    lo, hi = 0, len(tails)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if notes[tails[mid]].index < target_index:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _legacy_event_dict(
     *,
     index: int,
     time_ms: float,
@@ -623,430 +539,17 @@ def _build_event_dict(
     }
 
 
-def _hitmechanics_interlude(
-    *,
-    now: float,
-    col: int,
-    note_indices: list[int],
-    start_index: int,
-    notes: list[NoteEntry],
-    early_window: float,
-    late_window: float,
-    cbrush_threshold: float,
-    accepted_history: list[dict[str, float]],
-) -> tuple[str, Optional[int], Optional[float]]:
-    window_start = now - late_window
-    window_end = now - early_window
-
-    earliest: Optional[tuple[int, float]] = None
-    closest: Optional[tuple[int, float]] = None
-
-    i = start_index
-    while i < len(note_indices):
-        note_idx = note_indices[i]
-        note = notes[note_idx]
-        if note.time_ms > window_end:
-            break
-
-        if note.status == HIT_REQUIRED:
-            if note.time_ms >= window_start:
-                delta = now - note.time_ms
-                if earliest is None:
-                    earliest = (note_idx, delta)
-                if closest is None:
-                    closest = (note_idx, delta)
-                else:
-                    cur_abs = abs(delta)
-                    best_abs = abs(closest[1])
-                    if cur_abs < best_abs or (cur_abs == best_abs and note_idx < closest[0]):
-                        closest = (note_idx, delta)
-        i += 1
-
-    if earliest is None or closest is None:
-        return NOTFOUND, None, None
-
-    if cbrush_threshold > 0 and abs(closest[1]) < cbrush_threshold:
-        candidate_idx, candidate_delta = earliest
-    else:
-        candidate_idx, candidate_delta = closest
-
-    candidate_note_time = notes[candidate_idx].time_ms
-    blocked = False
-    for prev in accepted_history[-8:]:
-        if int(prev.get("column", -1)) != col:
-            continue
-        prev_note_time = float(prev.get("note_time", 0.0))
-        prev_press_time = float(prev.get("press_time", 0.0))
-        if prev_note_time >= candidate_note_time:
-            continue
-        bad_delta = prev_press_time - candidate_note_time
-        if early_window <= bad_delta <= late_window and abs(bad_delta) < abs(candidate_delta):
-            blocked = True
-            break
-
-    if blocked:
-        return BLOCKED, None, None
-    return FOUND, candidate_idx, candidate_delta
-
-
-def _hitmechanics_etterna(
-    *,
-    now: float,
-    note_indices: list[int],
-    start_index: int,
-    notes: list[NoteEntry],
-    early_window: float,
-    late_window: float,
-) -> tuple[str, Optional[int], Optional[float]]:
-    window_start = now - late_window
-    window_end = now - early_window
-
-    best: Optional[tuple[int, float]] = None
-    i = start_index
-    while i < len(note_indices):
-        idx = note_indices[i]
-        note = notes[idx]
-        if note.time_ms > window_end:
-            break
-        if note.status == HIT_REQUIRED:
-            delta = now - note.time_ms
-            if best is None or abs(delta) < abs(best[1]) or (abs(delta) == abs(best[1]) and idx < best[0]):
-                best = (idx, delta)
-        i += 1
-
-    if best is None:
-        return NOTFOUND, None, None
-    return FOUND, best[0], best[1]
-
-
-def _hitmechanics_osumania(
-    *,
-    now: float,
-    col: int,
-    note_indices: list[int],
-    start_index: int,
-    notes: list[NoteEntry],
-    early_window: float,
-    late_window: float,
-) -> tuple[str, Optional[int], Optional[float]]:
-    window_start = now - late_window
-    window_end = now - early_window
-
-    i = start_index
-    while i < len(note_indices):
-        idx = note_indices[i]
-        note = notes[idx]
-        if note.time_ms > window_end:
-            break
-
-        delta = now - note.time_ms
-        if note.status == HIT_ACCEPTED and delta < 0.0:
-            return BLOCKED, None, None
-
-        if note.status == HIT_REQUIRED and note.time_ms >= window_start:
-            return FOUND, idx, delta
-
-        i += 1
-
-    return NOTFOUND, None, None
-
-
-def _expire_notes(
-    *,
-    now: float,
-    notes: list[NoteEntry],
-    notes_by_col: dict[int, list[int]],
-    tails_by_col: dict[int, list[int]],
-    note_start_index: dict[int, int],
-    tail_start_index: dict[int, int],
-    late_note_window: float,
-    late_release_window: float,
-    matched_events: list[dict[str, Any]],
-    hold_states: list[HoldState],
-) -> None:
-    for col, indices in notes_by_col.items():
-        ptr = note_start_index[col]
-        while ptr < len(indices):
-            idx = indices[ptr]
-            note = notes[idx]
-            if note.time_ms + late_note_window >= now:
-                break
-
-            if note.status == HIT_REQUIRED:
-                note.status = MISS
-                note.hold_state = "MissedHead" if note.note_kind == NOTE_HOLD_HEAD else None
-                # Interlude: MISS event time = note_time + late_window (note timeout time)
-                miss_time = note.time_ms + late_note_window
-                matched_events.append(
-                    _build_event_dict(
-                        index=note.index,
-                        time_ms=miss_time,
-                        column=note.column,
-                        action="MISS",
-                        note_kind=note.note_kind,
-                        press_time=None,
-                        release_time=None,
-                        delta=None,
-                        head_delta=note.head_delta,
-                        tail_delta=note.tail_delta,
-                        hold_state=note.hold_state,
-                        blocked=False,
-                        judgement_index=None,
-                        notes_map_index=note.index,
-                    )
-                )
-
-                # 头 miss 时把尾也标记为 miss，避免遗留 RELEASE_REQUIRED。
-                if note.tail_index is not None:
-                    tail = notes[note.tail_index]
-                    if tail.status == RELEASE_REQUIRED:
-                        tail.status = MISS
-                        tail.hold_state = "MissedHead"
-                        tail_miss_time = tail.time_ms + late_note_window
-                        matched_events.append(
-                            _build_event_dict(
-                                index=tail.index,
-                                time_ms=tail_miss_time,
-                                column=tail.column,
-                                action="MISS",
-                                note_kind=tail.note_kind,
-                                press_time=None,
-                                release_time=None,
-                                delta=None,
-                                head_delta=note.head_delta,
-                                tail_delta=None,
-                                hold_state="MissedHead",
-                                blocked=False,
-                                judgement_index=None,
-                                notes_map_index=tail.index,
-                            )
-                        )
-                        state = hold_states[col]
-                        if state.active and state.head_index == note.index:
-                            hold_states[col] = HoldState()
-
-            ptr += 1
-        note_start_index[col] = ptr
-
-    for col, tail_indices in tails_by_col.items():
-        ptr = tail_start_index[col]
-        while ptr < len(tail_indices):
-            idx = tail_indices[ptr]
-            tail = notes[idx]
-            if tail.time_ms + late_release_window >= now:
-                break
-            if tail.status == RELEASE_REQUIRED:
-                tail.status = DROP_HOLD
-                tail.hold_state = "Dropped"
-                drop_time = tail.time_ms + late_release_window
-                matched_events.append(
-                    _build_event_dict(
-                        index=tail.index,
-                        time_ms=drop_time,
-                        column=tail.column,
-                        action="DROP_HOLD",
-                        note_kind=tail.note_kind,
-                        press_time=tail.press_time,
-                        release_time=tail.release_time,
-                        delta=None,
-                        head_delta=tail.head_delta,
-                        tail_delta=tail.tail_delta,
-                        hold_state="Dropped",
-                        blocked=False,
-                        judgement_index=None,
-                        notes_map_index=tail.index,
-                    )
-                )
-
-                if tail.head_index is not None:
-                    head = notes[tail.head_index]
-                    if head.hold_state in (None, "Holding"):
-                        head.hold_state = "Dropped"
-                state = hold_states[col]
-                if state.active and state.tail_index == tail.index:
-                    hold_states[col] = HoldState()
-
-            ptr += 1
-        tail_start_index[col] = ptr
-
-
-def _apply_press(
-    *,
-    now: float,
-    col: int,
-    outcome: str,
-    note_index: Optional[int],
+def _f_event(
+    index: int,
+    time: float,
+    column: int,
+    action: str,
     delta: Optional[float],
-    notes: list[NoteEntry],
-    hold_states: list[HoldState],
-    matched_events: list[dict[str, Any]],
-    offset_vector: list[Optional[float]],
-    delta_list: list[tuple[int, float]],
-    matched_pairs: list[tuple[int, float, float]],
-    unmatched_presses: list[tuple[int, float]],
-    accepted_history: list[dict[str, float]],
-    judgement_windows: list[tuple[int, float, float]],
-    ghost_tap_judgement: Optional[int],
-) -> None:
-    if outcome == FOUND and note_index is not None and delta is not None:
-        note = notes[note_index]
-        note.status = HIT_ACCEPTED
-        note.matched = True
-        note.press_time = now
-        note.delta = delta
-        note.head_delta = delta if note.note_kind == NOTE_HOLD_HEAD else note.head_delta
-        note.hold_state = "Holding" if note.note_kind == NOTE_HOLD_HEAD else note.hold_state
-        note.judgement_index = _infer_judgement_index(delta, judgement_windows)
-
-        action = "HOLD_HEAD" if note.note_kind == NOTE_HOLD_HEAD else "HIT"
-        offset_vector[note.index] = float(delta)
-        delta_list.append((col, float(delta)))
-        matched_pairs.append((col, float(note.time_ms), float(now)))
-
-        matched_events.append(
-            _build_event_dict(
-                index=note.index,
-                time_ms=note.time_ms,
-                column=note.column,
-                action=action,
-                note_kind=note.note_kind,
-                press_time=now,
-                release_time=None,
-                delta=delta,
-                head_delta=note.head_delta,
-                tail_delta=note.tail_delta,
-                hold_state=note.hold_state,
-                blocked=False,
-                judgement_index=note.judgement_index,
-                notes_map_index=note.index,
-            )
-        )
-
-        accepted_history.append(
-            {
-                "column": float(col),
-                "note_time": float(note.time_ms),
-                "press_time": float(now),
-                "delta": float(delta),
-            }
-        )
-
-        if note.note_kind == NOTE_HOLD_HEAD and note.tail_index is not None:
-            tail = notes[note.tail_index]
-            tail.head_delta = delta
-            hold_states[col] = HoldState(
-                active=True,
-                head_index=note.index,
-                tail_index=tail.index,
-                press_time=now,
-            )
-        return
-
-    unmatched_presses.append((col, float(now)))
-    blocked = outcome == BLOCKED
-
-    if blocked or ghost_tap_judgement is not None:
-        matched_events.append(
-            _build_event_dict(
-                index=-1,
-                time_ms=float(now),
-                column=col,
-                action="GHOST_TAP",
-                note_kind=NOTE_KIND_ANY,
-                press_time=now,
-                release_time=None,
-                delta=None,
-                head_delta=None,
-                tail_delta=None,
-                hold_state=None,
-                blocked=blocked,
-                judgement_index=ghost_tap_judgement,
-                notes_map_index=None,
-            )
-        )
-
-
-def _apply_release(
-    *,
-    now: float,
-    col: int,
-    notes: list[NoteEntry],
-    hold_states: list[HoldState],
-    release_early_window: float,
-    release_late_window: float,
-    release_judgement_windows: list[tuple[int, float, float]],
-    matched_events: list[dict[str, Any]],
-    offset_vector: list[Optional[float]],
-) -> None:
-    state = hold_states[col]
-    if not state.active or state.tail_index is None:
-        return
-
-    tail = notes[state.tail_index]
-    head = notes[state.head_index] if state.head_index is not None else None
-
-    tail.release_time = now
-    tail.press_time = state.press_time
-    tail_delta = now - tail.time_ms
-    tail.tail_delta = tail_delta
-
-    if release_early_window <= tail_delta <= release_late_window:
-        tail.status = RELEASE_ACCEPTED
-        tail.matched = True
-        tail.hold_state = "Released"
-        tail.judgement_index = _infer_judgement_index(tail_delta, release_judgement_windows)
-        offset_vector[tail.index] = float(tail_delta)
-
-        if head is not None:
-            head.release_time = now
-            head.tail_delta = tail_delta
-            head.hold_state = "Released"
-
-        matched_events.append(
-            _build_event_dict(
-                index=tail.index,
-                time_ms=tail.time_ms,
-                column=tail.column,
-                action="RELEASE",
-                note_kind=tail.note_kind,
-                press_time=tail.press_time,
-                release_time=now,
-                delta=tail_delta,
-                head_delta=tail.head_delta,
-                tail_delta=tail_delta,
-                hold_state="Released",
-                blocked=False,
-                judgement_index=tail.judgement_index,
-                notes_map_index=tail.index,
-            )
-        )
-    else:
-        tail.status = DROP_HOLD
-        tail.hold_state = "Dropped"
-        if head is not None and head.status == HIT_ACCEPTED:
-            head.release_time = now
-            head.tail_delta = tail_delta
-            head.hold_state = "Dropped"
-
-        matched_events.append(
-            _build_event_dict(
-                index=tail.index,
-                time_ms=tail.time_ms,
-                column=tail.column,
-                action="DROP_HOLD",
-                note_kind=tail.note_kind,
-                press_time=tail.press_time,
-                release_time=now,
-                delta=tail_delta,
-                head_delta=tail.head_delta,
-                tail_delta=tail_delta,
-                hold_state="Dropped",
-                blocked=False,
-                judgement_index=None,
-                notes_map_index=tail.index,
-            )
-        )
-
-    hold_states[col] = HoldState()
-
-
+) -> dict[str, Any]:
+    return {
+        "index": int(index),
+        "time": float(time),
+        "column": int(column),
+        "action": action,
+        "delta": None if delta is None else float(delta),
+    }

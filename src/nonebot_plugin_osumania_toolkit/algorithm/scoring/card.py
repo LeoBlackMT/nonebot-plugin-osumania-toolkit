@@ -175,7 +175,7 @@ def _build_judgement_bar_rows(score: dict[str, Any], rs: ruleset_file) -> list[d
 
     rows: list[dict[str, Any]] = []
     for name, count, color in normalized:
-        width = 0.0 if count <= 0 else min(100.0, max(6.0, count / max_count * 100.0))
+        width = 0.0 if count <= 0 else min(100.0, count / max_count * 100.0)
         rows.append(
             {
                 "name": name,
