@@ -753,6 +753,8 @@ def get_score_result(
                             "source": "ghost",
                         }
                     )
+                else:
+                    combo_action = "nochange"
             else:
                 continue
 

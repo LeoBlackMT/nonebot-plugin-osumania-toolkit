@@ -283,7 +283,7 @@ def match_notes_and_presses(
                             else float("inf")
                         )
                         if head_row < expired_row_ptr:
-                            hold_states[k] = HoldState()
+                            hold_states[k] = HoldState(H_NOTHING, note.index)
                         emit_f(
                             index=note.row_index,
                             time=ev_time,
@@ -330,7 +330,7 @@ def match_notes_and_presses(
                 elif tail.status == RELEASE_REQUIRED:
                     tail.status = RELEASE_ACCEPTED
                     tail.matched = True
-                    hold_states[k] = HoldState()
+                    hold_states[k] = HoldState(H_NOTHING, state.head_index)
                     head_delta = head.head_delta if head.head_delta is not None else head.delta
                     emit_f(
                         index=tail.row_index,
@@ -564,7 +564,7 @@ def match_notes_and_presses(
                 judgement = _infer_judgement_index(release_delta, release_judgement_windows)
                 tail.judgement_index = judgement
                 offset_vector[tail.index] = release_delta
-                hold_states[k] = HoldState()
+                hold_states[k] = HoldState(H_NOTHING, state.head_index)
 
                 emit_f(
                     index=tail.row_index,
