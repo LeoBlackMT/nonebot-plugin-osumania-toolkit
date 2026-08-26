@@ -160,7 +160,22 @@ def _decimal_places_from_ruleset(rs: ruleset_file) -> int:
 def _format_accuracy_percent(score: dict[str, Any], rs: ruleset_file) -> str:
     frac = float(score.get("accuracy_fraction", 0.0) or 0.0)
     dp = _decimal_places_from_ruleset(rs)
-    return f"{frac * 100:.{dp}f}%"
+    # Rulesets.FormatAccuracy (Rulesets.fs) verbatim
+    if dp == 4:
+        return f"{frac * 100:.4f}%"
+    if dp == 3:
+        if frac == 1.0:
+            return "100.000%"
+        if frac > 0.99998:
+            return f"{frac * 100:.4f}%"
+        return f"{frac * 100:.3f}%"
+    if frac == 1.0:
+        return "100.00%"
+    if frac > 0.99998:
+        return f"{frac * 100:.4f}%"
+    if frac > 0.9998:
+        return f"{frac * 100:.3f}%"
+    return f"{frac * 100:.2f}%"
 
 
 def _format_judgement_counts(score: dict[str, Any], rs: ruleset_file) -> str:
@@ -202,10 +217,18 @@ def _format_lamp(score: dict[str, Any]) -> str:
 
 def _format_grade(score: dict[str, Any]) -> str:
     grade = score.get("grade")
-    if not isinstance(grade, dict):
-        return "None"
-    name = str(grade.get("name", "")).strip()
-    return name if name else "None"
+    if isinstance(grade, dict):
+        name = str(grade.get("name", "")).strip()
+        if name:
+            return name
+    # interlude GradeName: index below the first grade renders as "F"
+    try:
+        grade_index = int(score.get("grade_index", -1))
+    except Exception:
+        grade_index = -1
+    if grade_index < 0:
+        return "F"
+    return "None"
 
 
 def _visible_warnings(score: dict[str, Any]) -> list[str]:
