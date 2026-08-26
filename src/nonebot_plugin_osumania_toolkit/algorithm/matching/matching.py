@@ -43,6 +43,7 @@ from .helpers import (
     _release_windows,
     _retime_frames,
     f32,
+    f32div,
 )
 
 MIRROR_MOD = 1 << 30  # osu! Mirror
@@ -275,7 +276,14 @@ def match_notes_and_presses(
                         note.matched = True
                         note.release_time = now if now != float("inf") else note.time_ms
                         note.tail_delta = note.delta
-                        hold_states[k] = HoldState()
+                        # F#: 仅当当前持有的头行早于本过期行时才重置状态
+                        head_row = (
+                            notes[state.head_index].row_index
+                            if state.head_index is not None
+                            else float("inf")
+                        )
+                        if head_row < expired_row_ptr:
+                            hold_states[k] = HoldState()
                         emit_f(
                             index=note.row_index,
                             time=ev_time,
@@ -286,6 +294,7 @@ def match_notes_and_presses(
                             overhold=overhold,
                             dropped=dropped,
                             missed_head=missed_head,
+                            head_delta=head_delta,
                         )
                         emit_legacy(
                             index=note.index,
@@ -333,6 +342,7 @@ def match_notes_and_presses(
                         overhold=False,
                         dropped=True,
                         missed_head=state.MissedHead,
+                        head_delta=head_delta,
                     )
                     emit_legacy(
                         index=tail.index,
@@ -408,7 +418,7 @@ def match_notes_and_presses(
                 note.status = HIT_ACCEPTED
                 note.matched = True
                 note.press_time = float(now)
-                delta_gametime = f32(f32(target_delta) / rate_f)
+                delta_gametime = f32div(target_delta, rate_f)
                 note.delta = delta_gametime
                 if is_hold:
                     note.head_delta = delta_gametime
@@ -545,7 +555,7 @@ def match_notes_and_presses(
                 if overhold:
                     release_delta = tail.delta
                 else:
-                    tail.delta = f32(fdelta / rate_f)
+                    tail.delta = f32div(fdelta, rate_f)
                     release_delta = tail.delta
                 tail.tail_delta = release_delta
                 head.release_time = float(now)
@@ -566,6 +576,7 @@ def match_notes_and_presses(
                     overhold=overhold,
                     dropped=state.IsDropped,
                     missed_head=state.MissedHead,
+                    head_delta=head.delta if head.delta is not None else head.head_delta,
                 )
                 emit_legacy(
                     index=tail.index,

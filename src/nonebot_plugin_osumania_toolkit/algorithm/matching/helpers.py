@@ -38,6 +38,13 @@ def f32(value: float) -> float:
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
+def f32div(a: float, b: float) -> float:
+    """float32 division (F# `delta / rate` stays in float32)."""
+    import numpy as np
+
+    return float(np.float32(np.float32(a) / np.float32(b)))
+
+
 @dataclass(slots=True)
 class NoteEntry:
     index: int
@@ -256,7 +263,11 @@ def _build_hitflagdata(osu: osu_file, mirror: bool = False) -> tuple[list[NoteEn
         row_idx = row_index_of[t]
 
         limit = min(keys, len(row))
-        for col in range(limit):
+        # 行内按映射后列升序产出（mirror 时原始列逆序映射），使行内事件顺序与 F# 逐列升序一致
+        for mapped in range(keys):
+            col = (keys - 1 - mapped) if mirror else mapped
+            if col >= limit:
+                continue
             note_kind = int(row[col] or 0)
             if note_kind == 0:
                 continue
