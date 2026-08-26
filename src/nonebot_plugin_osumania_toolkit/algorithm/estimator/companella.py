@@ -10,7 +10,7 @@ import numpy as np
 from .interlude import calculate_interlude_star
 from ..ett.calc import compute_difficulties
 from .exceptions import UnsupportedKeyError
-from .shared import load_osu_chart, resolve_chart_path
+from .shared import js_fixed, load_osu_chart, resolve_chart_path
 from .sunny import estimate_sunny_result
 
 
@@ -70,7 +70,7 @@ def _parse_prediction(raw_value: float) -> tuple[int, str]:
     if raw_value >= MAX_DAN:
         return 19, "++"
 
-    dan_level = int(_clamp(round(raw_value), 1, 20))
+    dan_level = int(_clamp(math.floor(raw_value + 0.5), 1, 20))
     dan_index = dan_level - 1
     offset = raw_value - dan_level
     if offset <= -0.3:
@@ -164,8 +164,8 @@ def classify_companella_difficulty(
     shifted_raw_value = _clamp(raw_model_value, MIN_DAN, MAX_DAN) + 1.0
     dan_index, variant = _parse_prediction(shifted_raw_value)
     label = DAN_LABELS[dan_index] if 0 <= dan_index < len(DAN_LABELS) else "?"
-    rounded_raw = round(shifted_raw_value, 2)
-    rounded_center = round(shifted_raw_value)
+    rounded_raw = js_fixed(shifted_raw_value, 2)
+    rounded_center = math.floor(shifted_raw_value + 0.5)
     confidence = max(0.0, 1.0 - abs(shifted_raw_value - rounded_center) * 2.0)
 
     return {
