@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import struct
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,14 @@ class NoteType:
 
 
 def f32(value: float) -> float:
-    return float(value)
+    # JS numberUtils.f32 / Math.fround：真实 IEEE binary32 舍入。
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+# JS 侧经 f32() 包裹的模块常量，binary32 值与 double 字面量不同：
+_F32_CURVE_POWER = f32(0.6)
+_F32_CURVE_SCALE = f32(0.4056)
+_F32_STRAIN_SCALE = f32(0.01626)
 
 
 def round_to_even(value: float) -> int:
@@ -71,10 +79,12 @@ def _normalize_cvt_flag(cvt_flag: Any) -> str | None:
 
 def _apply_conversion_flag(chart: osu_file, cvt_flag: Any) -> None:
     normalized = _normalize_cvt_flag(cvt_flag)
-    if normalized == "IN" and hasattr(chart, "modIN"):
-        chart.modIN()
-    elif normalized == "HO" and hasattr(chart, "modHO"):
-        chart.modHO()
+    # 修复：parser 的方法名是 snake_case（mod_IN/mod_HO）；旧代码探测 camelCase
+    # （modIN/modHO）导致 hasattr 恒 False、转换从未生效的死调用点。
+    if normalized == "IN" and hasattr(chart, "mod_IN"):
+        chart.mod_IN()
+    elif normalized == "HO" and hasattr(chart, "mod_HO"):
+        chart.mod_HO()
 
 
 def _resolve_source_path(source: Any) -> Path:
@@ -97,16 +107,22 @@ def _resolve_source_path(source: Any) -> Path:
     raise TypeError("Unsupported Interlude source. Provide osu text or a chart path.")
 
 
-def build_interlude_rows(source: Any, cvt_flag: Any = None) -> dict[str, Any]:
+def build_interlude_rows(
+    source: Any, cvt_flag: Any = None, *, chart: Any = None
+) -> dict[str, Any]:
     temp_path: Path | None = None
-    path = _resolve_source_path(source)
-    if path.exists() and path.is_file() and path.suffix.lower() == ".osu":
-        chart = osu_file(str(path))
-        chart.process()
+    if chart is not None:
+        working = chart.clone()
     else:
-        temp_path = path if path.exists() and path.is_file() else None
-        chart = osu_file(str(path))
-        chart.process()
+        path = _resolve_source_path(source)
+        if path.exists() and path.is_file() and path.suffix.lower() == ".osu":
+            working = osu_file(str(path))
+            working.process()
+        else:
+            temp_path = path if path.exists() and path.is_file() else None
+            working = osu_file(str(path))
+            working.process()
+    chart = working
 
     try:
         if chart.status == "NotMania":
@@ -181,11 +197,14 @@ def calculate_note_ratings(rate: float, note_rows: list[dict[str, Any]]) -> list
                     continue
 
                 trill_delta = (time - last_note_in_column[hand_k]) / rate_value
-                x = 0.02 * trill_delta
+                x = f32(0.02 * trill_delta)
                 if not math.isfinite(x) or x <= 0:
                     trill_value = 0.0
                 else:
-                    trill_value = (300.0 / x) - (300.0 / math.pow(x, 10.0) / 10.0)
+                    # JS msToStreamBpm:x 与整个表达式都在 fround 边界上。
+                    trill_value = f32(
+                        (300.0 / x) - (300.0 / math.pow(x, 10.0) / 10.0)
+                    )
                     if trill_value < 0:
                         trill_value = 0.0
                 ratio = jack_delta / trill_delta if trill_delta > 0 else 0.0
@@ -249,14 +268,17 @@ def calculate_variety(rate: float, note_rows: list[dict[str, Any]], note_difficu
 
 
 def _create_strain_function(half_life: float):
-    decay_rate = math.log(0.5) / half_life
+    # JS strain.js createStrainFunction:每个运算边界都有 fround。
+    decay_rate = f32(math.log(0.5) / half_life)
 
     def strain(value: float, input_value: float, delta: float) -> float:
         clamped_delta = min(200.0, delta)
-        decay = math.exp(decay_rate * clamped_delta)
-        time_cap_decay = math.exp(decay_rate * (delta - 200.0)) if delta > 200.0 else 1.0
-        a = value * time_cap_decay
-        b = input_value * input_value * 0.01626
+        decay = f32(math.exp(decay_rate * clamped_delta))
+        time_cap_decay = (
+            f32(math.exp(decay_rate * (delta - 200.0))) if delta > 200.0 else 1.0
+        )
+        a = f32(value * time_cap_decay)
+        b = f32(input_value * input_value * _F32_STRAIN_SCALE)
         return f32(b - (b - a) * decay)
 
     return strain
@@ -354,14 +376,14 @@ def weighted_overall_difficulty(data: list[float]) -> float:
     total = 0.0
     for i, value in enumerate(values):
         x = max(0.0, (float(i) + 2500.0 - length) / 2500.0)
-        w = 0.002 + math.pow(x, 4.0)
+        w = f32(0.002 + math.pow(x, 4.0))
         weight += w
         total += value * w
 
     if not math.isfinite(weight) or weight <= 0:
         return 0.0
 
-    transformed = math.pow(total / weight, 0.6) * 0.4056
+    transformed = math.pow(total / weight, _F32_CURVE_POWER) * _F32_CURVE_SCALE
     return f32(transformed) if math.isfinite(transformed) else 0.0
 
 
@@ -385,13 +407,17 @@ def calculate_interlude_difficulty(rate: float, note_rows: list[dict[str, Any]])
     return {"noteDifficulty": note_difficulty, "strains": strains, "variety": variety, "hands": hands, "overall": overall}
 
 
-def calculate_interlude_star(source: Any, rate: float = 1.0, cvt_flag: Any = None) -> float:
+def calculate_interlude_star(
+    source: Any, rate: float = 1.0, cvt_flag: Any = None, *, chart: Any = None
+) -> float:
     resolved_rate = rate if math.isfinite(rate) and rate > 0 else 1.0
-    built = build_interlude_rows(source, cvt_flag)
+    built = build_interlude_rows(source, cvt_flag, chart=chart)
     difficulty = calculate_interlude_difficulty(resolved_rate, built["rows"])
     overall = float(difficulty.get("overall", 0.0))
     return overall if math.isfinite(overall) else 0.0
 
 
-def estimate_interlude_star_from_chart(source: Any, rate: float = 1.0, cvt_flag: Any = None) -> float:
-    return calculate_interlude_star(source, rate, cvt_flag)
+def estimate_interlude_star_from_chart(
+    source: Any, rate: float = 1.0, cvt_flag: Any = None, *, chart: Any = None
+) -> float:
+    return calculate_interlude_star(source, rate, cvt_flag, chart=chart)

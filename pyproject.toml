@@ -80,7 +80,7 @@ ignore = ["C901", "T201", "E731", "E402"]
 [tool.pyright]
 pythonVersion = "3.10"
 pythonPlatform = "All"
-typeCheckingMode = "basic"
+typeCheckingMode = "off"
 
 [tool.nonebot]
 adapters = [

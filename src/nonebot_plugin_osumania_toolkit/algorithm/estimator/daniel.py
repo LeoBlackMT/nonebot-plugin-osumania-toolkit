@@ -16,9 +16,15 @@ def estimate_daniel_result(
     cvt_flag: Any = None,
     *,
     sunny_result: dict[str, Any] | None = None,
+    chart: Any = None,
 ) -> dict[str, Any]:
-    path = resolve_chart_path(source)
-    daniel_raw = calculate_daniel(str(path), speed_rate, od_flag, with_graph=False)
+    if chart is not None:
+        daniel_raw = calculate_daniel(
+            source, speed_rate, od_flag, with_graph=False, chart=chart
+        )
+    else:
+        path = resolve_chart_path(source)
+        daniel_raw = calculate_daniel(str(path), speed_rate, od_flag, with_graph=False)
 
     if daniel_raw == -1:
         raise ParseError("Beatmap parse failed")
@@ -27,14 +33,18 @@ def estimate_daniel_result(
     if daniel_raw == -3:
         # Unsupported keys → fall back to Sunny
         if sunny_result is None:
-            sunny_result = estimate_sunny_result(source, speed_rate, od_flag, cvt_flag)
+            sunny_result = estimate_sunny_result(
+                source, speed_rate, od_flag, cvt_flag, chart=chart
+            )
         return sunny_result
 
     sr, ln_ratio, column_count = daniel_raw
 
     if column_count != 4:
         if sunny_result is None:
-            sunny_result = estimate_sunny_result(source, speed_rate, od_flag, cvt_flag)
+            sunny_result = estimate_sunny_result(
+                source, speed_rate, od_flag, cvt_flag, chart=chart
+            )
         return {
             **sunny_result,
             "star": float(sr),

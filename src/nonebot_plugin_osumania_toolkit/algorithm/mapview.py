@@ -10,6 +10,7 @@ from .conversion import convert_mc_to_osu
 from .estimator.companella import estimate_companella_result
 from .estimator.mixed import apply_companella_to_mixed_result
 from .estimator.mixed import estimate_mixed_result
+from .estimator.shared import load_osu_chart
 from .estimator.sunny import build_sunny_result
 from .pattern import PatternNotManiaError, PatternParseError, analyze_pattern_file
 from .estimator.exceptions import ParseError, NotManiaError
@@ -125,9 +126,17 @@ async def analyze_mapview_chart(
         except Exception as e:
             raise ParseError(f".mc 转 .osu 失败: {e}") from e
 
+    # 单次解析，各消费者拿 clone。
+    try:
+        base_chart = await asyncio.to_thread(load_osu_chart, str(target_file))
+    except ParseError as e:
+        detail = _format_parse_error_detail(e)
+        raise ParseError(f"Rework 解析阶段失败: {detail}") from e
+
     try:
         sr, ln_ratio, column_count = await get_rework_result(
-            str(target_file), speed_rate, od_flag, cvt_flag
+            str(target_file), speed_rate, od_flag, cvt_flag,
+            chart=base_chart.clone(),
         )
     except ParseError as e:
         detail = _format_parse_error_detail(e)
@@ -144,6 +153,7 @@ async def analyze_mapview_chart(
             od_flag,
             cvt_flag,
             sunny_result,
+            chart=base_chart.clone(),
         )
         mixed_diff_text = str(mixed_result.get("estDiff", sunny_result["estDiff"]))
     except Exception:
@@ -157,6 +167,7 @@ async def analyze_mapview_chart(
                 speed_rate,
                 cvt_flag,
                 sunny_result=sunny_result,
+                chart=base_chart.clone(),
             )
             mixed_result = apply_companella_to_mixed_result(mixed_result, companella_result)
             mixed_diff_text = str(mixed_result.get("estDiff", mixed_diff_text))

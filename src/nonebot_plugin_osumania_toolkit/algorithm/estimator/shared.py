@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
 from ...parser.osu_file_parser import osu_file
+
+
+def js_fixed(x: float, d: int = 2) -> float:
+    """JS ``Number(x.toFixed(d))`` 语义（Decimal HALF_UP，平局向 +∞）。"""
+    return float(Decimal(x).quantize(Decimal(1).scaleb(-d), rounding=ROUND_HALF_UP))
 
 
 def normalize_cvt_flags(value: Any) -> tuple[bool, bool, str]:
