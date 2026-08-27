@@ -2,7 +2,7 @@ import os
 import asyncio
 from pathlib import Path
 
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment, Message
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException
 from nonebot import on_command
@@ -15,11 +15,12 @@ from ..parser.mr_file_parser import mr_file
 
 from ..render.delta import plot_delta
 from ..file.path import safe_filename
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.cleanup import cleanup_temp_file
 from ..algorithm.utils import parse_cmd, is_mc_file
 from ..algorithm.conversion import convert_mr_to_osr, convert_mc_to_osu
+from .. import platform
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -46,23 +47,11 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
         else:
             state["status"] = "Fail"
             await delta.finish("请回复一条包含回放文件的消息。")
-    reply = event.reply
-    file_seg = None
-    for seg in reply.message:
-        if seg.type == "file":
-            file_seg = seg
-            break
 
-    if not file_seg:
-        state["status"] = "Fail"
-        await delta.finish("回复的消息中没有找到文件。")
-
-    # 获取文件信息
-    file_info = await get_file_url(bot, file_seg)
+    file_info = await platform.extract_replied_file(bot, event)
     if not file_info:
         state["status"] = "Fail"
-        await delta.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
+        await delta.finish("回复的消息中没有找到文件。")
     file_name, file_url = file_info
     file_name = os.path.basename(file_name)
     if not (file_name.lower().endswith(".osr") or file_name.lower().endswith(".mr")):
@@ -134,7 +123,8 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
             )
             output_path = result
             state["status"] = "Finish"
-            await delta.finish(MessageSegment.image(f"file://{output_path}"))
+            await platform.send_image(bot, delta, Path(output_path).read_bytes())
+            await delta.finish()
         except FinishedException:
             pass
         except Exception as e:
@@ -177,20 +167,9 @@ async def handle_file(bot: Bot, state: T_State, user_file: Message = Arg("user_f
             pass
     
     # 检查用户是否发送了文件
-    file_seg = None
-    for seg in user_file:
-        if seg.type == "file":
-            file_seg = seg
-            break
-        
-    if not file_seg:
-        await delta.finish("未找到谱面文件，操作已取消。")
-
-    # 获取文件信息
-    file_info = await get_file_url(bot, file_seg)
+    file_info = await platform.extract_file_from_message(bot, user_file)
     if not file_info:
-        await delta.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
+        await delta.finish("未找到谱面文件，操作已取消。")
     file_name, file_url = file_info
     file_name = os.path.basename(file_name)
     if not (file_name.lower().endswith(".osu") or file_name.lower().endswith(".mc")):
@@ -242,7 +221,8 @@ async def handle_file(bot: Bot, state: T_State, user_file: Message = Arg("user_f
             None, plot_delta, osr, osu, str(CACHE_DIR)
         )
         output_path = result
-        await delta.finish(MessageSegment.image(f"file://{output_path}"))
+        await platform.send_image(bot, delta, Path(output_path).read_bytes())
+        await delta.finish()
     except FinishedException:
         pass
     except Exception as e:

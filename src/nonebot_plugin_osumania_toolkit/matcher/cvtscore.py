@@ -1,16 +1,16 @@
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
 from nonebot.exception import FinishedException, RejectedException
 from nonebot.params import Arg
 from nonebot.typing import T_State
 
 from ..file.cache import CACHE_DIR
+from .. import platform
 
 from ..algorithm.scoring import (
     cleanup_cvtscore_state,
-    first_file_segment,
     get_ruleset_quick_help_text,
     load_chart_from_file_seg,
     load_replay_from_file_seg,
@@ -29,7 +29,7 @@ TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 cvtscore = on_command("cvtscore", aliases={"转换"}, block=True)
 
 
-async def _finish_with_cvtscore_result(payload: dict | None):
+async def _finish_with_cvtscore_result(bot: Bot, payload: dict | None):
     payload = payload or {}
     text = str(payload.get("text") or "转换完成。")
     card_data = payload.get("card_data")
@@ -40,7 +40,8 @@ async def _finish_with_cvtscore_result(payload: dict | None):
         except Exception:
             pass
         else:
-            await cvtscore.finish(MessageSegment.image(image_bytes))
+            await platform.send_image(bot, cvtscore, image_bytes)
+            await cvtscore.finish()
 
     await cvtscore.finish(text)
 
@@ -78,13 +79,18 @@ async def handle_cvtscore_first(bot: Bot, event: MessageEvent, state: T_State):
 
     try:
         if event.reply:
-            file_seg = first_file_segment(event.reply.message)
-            if file_seg is not None:
-                replay_err = await load_replay_from_file_seg(bot, file_seg, state, CACHE_DIR)
+            file_info = await platform.extract_replied_file(bot, event)
+            if file_info is not None:
+                file_name, file_url = file_info
+                replay_err = await load_replay_from_file_seg(
+                    bot, file_name, file_url, state, CACHE_DIR
+                )
                 if replay_err is None:
                     await cvtscore.send("已识别回复中的回放文件。")
                 else:
-                    chart_err = await load_chart_from_file_seg(bot, file_seg, state, CACHE_DIR)
+                    chart_err = await load_chart_from_file_seg(
+                        bot, file_name, file_url, state, CACHE_DIR
+                    )
                     if chart_err is None:
                         await cvtscore.send("已识别回复中的谱面文件。")
                     else:
@@ -108,7 +114,7 @@ async def handle_cvtscore_first(bot: Bot, event: MessageEvent, state: T_State):
 
         state["status"] = "Finish"
         await cleanup_cvtscore_state(state)
-        await _finish_with_cvtscore_result(payload)
+        await _finish_with_cvtscore_result(bot, payload)
 
     except FinishedException:
         raise
@@ -137,12 +143,15 @@ async def handle_cvtscore_interactive(bot: Bot, state: T_State, user_input: Mess
         await cvtscore.finish("已取消操作。")
 
     stage = str(state.get("stage") or "need_replay")
-    file_seg = first_file_segment(user_input)
+    file_info = await platform.extract_file_from_message(bot, user_input)
 
     try:
         if stage == "need_replay":
-            if file_seg is not None:
-                err = await load_replay_from_file_seg(bot, file_seg, state, CACHE_DIR)
+            if file_info is not None:
+                file_name, file_url = file_info
+                err = await load_replay_from_file_seg(
+                    bot, file_name, file_url, state, CACHE_DIR
+                )
                 if err:
                     state["reject_time"] = reject_time + 1
                     await cvtscore.reject(f"回放文件处理失败: {err}\n请重新发送 .osr/.mr 文件，或输入 0 取消。")
@@ -156,8 +165,11 @@ async def handle_cvtscore_interactive(bot: Bot, state: T_State, user_input: Mess
                 await cvtscore.reject("请发送回放文件（.osr/.mr）。输入 0 取消。")
 
         elif stage == "need_chart":
-            if file_seg is not None:
-                err = await load_chart_from_file_seg(bot, file_seg, state, CACHE_DIR)
+            if file_info is not None:
+                file_name, file_url = file_info
+                err = await load_chart_from_file_seg(
+                    bot, file_name, file_url, state, CACHE_DIR
+                )
                 if err:
                     state["reject_time"] = reject_time + 1
                     await cvtscore.reject(f"谱面文件处理失败: {err}\n请重新发送 .osu/.mc，或输入 b<bid>，输入 0 取消。")
@@ -183,7 +195,7 @@ async def handle_cvtscore_interactive(bot: Bot, state: T_State, user_input: Mess
                 await cvtscore.reject("请发送 .osu/.mc 谱面文件，或输入 b<bid>。输入 0 取消。")
 
         elif stage == "need_ruleset":
-            if file_seg is not None:
+            if file_info is not None:
                 state["reject_time"] = reject_time + 1
                 await cvtscore.reject("当前步骤需要输入目标 ruleset 文本，不需要发送文件。输入 0 取消。")
             if not text:
@@ -212,7 +224,7 @@ async def handle_cvtscore_interactive(bot: Bot, state: T_State, user_input: Mess
 
         state["status"] = "Finish"
         await cleanup_cvtscore_state(state)
-        await _finish_with_cvtscore_result(payload)
+        await _finish_with_cvtscore_result(bot, payload)
 
     except FinishedException:
         raise

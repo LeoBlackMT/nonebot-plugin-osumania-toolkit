@@ -12,9 +12,10 @@ from nonebot.exception import FinishedException, RejectedException
 
 from ..file.cache import CACHE_DIR
 from ..file.path import safe_filename
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.cleanup import cleanup_paths
+from .. import platform
 from ..algorithm.acc import (
     calculate_acc_from_dan, 
     calculate_acc,
@@ -158,19 +159,10 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
         await acc.finish("重试次数过多，已取消操作。")
     
     # 检查用户是否发送了文件
-    file_seg = None
-    for seg in message:
-        if seg.type == "file":
-            file_seg = seg
-            break
+    file_info = await platform.extract_file_from_message(bot, message)
     
-    if file_seg:
+    if file_info is not None:
         # 用户发送了文件
-        file_info = await get_file_url(bot, file_seg)
-        if not file_info:
-            state["status"] = "Fail"
-            await acc.finish("无法获取文件信息。")
-        
         file_name, file_url = file_info
         file_name = os.path.basename(file_name)
         

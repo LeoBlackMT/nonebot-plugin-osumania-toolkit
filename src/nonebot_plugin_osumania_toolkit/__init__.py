@@ -17,7 +17,7 @@ __plugin_meta__ = PluginMetadata(
     homepage = "https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit",
     type="application",
     config=Config,
-    supported_adapters={"~onebot.v11"}
+    supported_adapters={"~onebot.v11", "~qq"}
 )
 
 _VERSION = "1.1.4"

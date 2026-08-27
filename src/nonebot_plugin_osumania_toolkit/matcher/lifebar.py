@@ -3,15 +3,16 @@ import asyncio
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.log import logger
 
 from ..parser.osr_file_parser import osr_file
 
 from ..render.lifebar import plot_life
 from ..file.path import safe_filename
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..file.cleanup import cleanup_temp_file
+from .. import platform
 
 from ..file.cache import CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -23,21 +24,9 @@ async def handle_lifebar(bot: Bot, event: MessageEvent):
     if not event.reply:
         await lifebar.finish("请回复一条包含 .osr 文件的消息。")
 
-    reply = event.reply
-    file_seg = None
-    for seg in reply.message:
-        if seg.type == "file":
-            file_seg = seg
-            break
-
-    if not file_seg:
-        await lifebar.finish("回复的消息中没有找到文件。")
-
-    # 使用辅助函数获取文件信息
-    file_info = await get_file_url(bot, file_seg)
+    file_info = await platform.extract_replied_file(bot, event)
     if not file_info:
-        await lifebar.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
+        await lifebar.finish("回复的消息中没有找到文件。")
     file_name, file_url = file_info
     file_name = os.path.basename(file_name)
     if not file_name.lower().endswith(".osr"):
@@ -74,7 +63,7 @@ async def handle_lifebar(bot: Bot, event: MessageEvent):
         )
         
         output_path = result
-        await lifebar.send(MessageSegment.image(f"file://{output_path}"))
+        await platform.send_image(bot, lifebar, Path(output_path).read_bytes())
         
     except Exception as e:
         logger.exception("处理回放时出错")

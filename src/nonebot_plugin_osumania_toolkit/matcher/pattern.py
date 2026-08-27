@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nonebot import on_command
+from nonebot import get_plugin_config, on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.exception import FinishedException
 
@@ -20,14 +20,21 @@ from ..algorithm.pattern import (
 )
 from ..algorithm.pattern.card import build_pattern_card_data
 from ..render.pattern import render_pattern_card
-from ..algorithm.utils import parse_cmd, is_mc_file, resolve_meta_data, send_forward_text_messages
+from ..algorithm.utils import (
+    is_mc_file,
+    parse_cmd,
+    resolve_meta_data,
+    send_forward_text_messages,
+)
 from ..api.download import download_file, get_file_url
 from ..api.osu import download_file_by_id
 from ..file.path import safe_filename
-
-from ..file.cache import CACHE_DIR
+from .. import platform
 from ..config import Config
-config = Config()
+from ..file.cache import CACHE_DIR
+from ..render.batch import merge_images_to_grid
+
+config = get_plugin_config(Config)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
@@ -62,29 +69,71 @@ async def _send_pattern_rows(
     fallback_rows = _fallback_text_rows(rows)
 
     if detail_mode or not rows:
-        await send_forward_text_messages(bot, event, fallback_rows)
+        if platform.is_qq(bot):
+            await platform.send_markdown(
+                bot, pattern, "\n".join(fallback_rows)
+            )
+        else:
+            await send_forward_text_messages(bot, event, fallback_rows)
         return
 
+    # QQ 官方适配器：图片合并为长图或降级文本
+    if platform.is_qq(bot):
+        try:
+            if any(row.card_data is None for row in rows):
+                raise RuntimeError("fallback")
+
+            if len(rows) == 1:
+                image_bytes = await render_pattern_card(
+                    rows[0].card_data or {}, TEMPLATE_DIR
+                )
+                await platform.send_image(bot, pattern, image_bytes)
+                return
+
+            images: list[bytes] = []
+            for row in rows:
+                image_bytes = await render_pattern_card(
+                    row.card_data or {}, TEMPLATE_DIR
+                )
+                images.append(image_bytes)
+            merged = merge_images_to_grid(images)
+            await platform.send_image(bot, pattern, merged)
+        except Exception:
+            await platform.send_markdown(
+                bot, pattern, "\n".join(fallback_rows)
+            )
+        return
+
+    # OneBot v11：合并转发
     try:
         if any(row.card_data is None for row in rows):
             raise RuntimeError("fallback to forwarded text")
 
         if len(rows) == 1:
-            image_bytes = await render_pattern_card(rows[0].card_data or {}, TEMPLATE_DIR)
+            image_bytes = await render_pattern_card(
+                rows[0].card_data or {}, TEMPLATE_DIR
+            )
             await pattern.send(MessageSegment.image(image_bytes))
             return
 
         image_nodes: list[Message] = []
         for row in rows:
-            image_bytes = await render_pattern_card(row.card_data or {}, TEMPLATE_DIR)
-            image_nodes.append(Message(f"{row.file_name}\n") + MessageSegment.image(image_bytes))
+            image_bytes = await render_pattern_card(
+                row.card_data or {}, TEMPLATE_DIR
+            )
+            image_nodes.append(
+                Message(f"{row.file_name}\n")
+                + MessageSegment.image(image_bytes)
+            )
 
         await send_forward_text_messages(bot, event, image_nodes)
     except Exception:
         await send_forward_text_messages(bot, event, fallback_rows)
 
 
-async def _analyze_single_chart(chart_file: Path, file_name: str, rate: float) -> PatternOutputRow:
+async def _analyze_single_chart(
+    chart_file: Path, file_name: str, rate: float
+) -> PatternOutputRow:
     target_file = chart_file
     target_name = file_name
     if is_mc_file(str(target_file)):
@@ -105,13 +154,17 @@ async def _analyze_single_chart(chart_file: Path, file_name: str, rate: float) -
     )
 
 
-async def _analyze_zip_file(zip_file: Path, rate: float) -> tuple[list[PatternOutputRow], int]:
+async def _analyze_zip_file(
+    zip_file: Path, rate: float, max_charts: int | None = None
+) -> tuple[list[PatternOutputRow], int]:
     temp_dir = CACHE_DIR / f"pattern_batch_{int(time.time())}_{os.getpid()}"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         try:
-            chart_files = await asyncio.to_thread(extract_zip_file, zip_file, temp_dir)
+            chart_files = await asyncio.to_thread(
+                extract_zip_file, zip_file, temp_dir
+            )
         except Exception as e:
             return [
                 PatternOutputRow(
@@ -131,7 +184,11 @@ async def _analyze_zip_file(zip_file: Path, rate: float) -> tuple[list[PatternOu
             ], 0
 
         total = len(chart_files)
-        max_charts = config.batch_max_charts
+        max_charts = (
+            max_charts
+            if max_charts is not None
+            else config.batch_max_charts
+        )
         if max_charts > 0 and total > max_charts:
             chart_files = chart_files[:max_charts]
 
@@ -140,13 +197,17 @@ async def _analyze_zip_file(zip_file: Path, rate: float) -> tuple[list[PatternOu
 
         for chart_file in chart_files:
             try:
-                result = await _analyze_single_chart(chart_file, chart_file.name, rate)
+                result = await _analyze_single_chart(
+                    chart_file, chart_file.name, rate
+                )
                 results.append(result)
                 await asyncio.sleep(0)
             except PatternNotManiaError:
                 errors.append(f"{chart_file.name}: 不是 mania 模式")
             except PatternParseError as e:
-                errors.append(f"{chart_file.name}: 谱面解析失败 - {e}")
+                errors.append(
+                    f"{chart_file.name}: 谱面解析失败 - {e}"
+                )
             except Exception as e:
                 errors.append(f"{chart_file.name}: 分析失败 - {e}")
 
@@ -193,36 +254,69 @@ async def handle_pattern(bot: Bot, event: MessageEvent):
 
             file_name, file_url = file_info
             file_name = safe_filename(os.path.basename(file_name))
-            if not file_name.lower().endswith((".osu", ".mc", ".osz", ".mcz")):
-                await pattern.finish("请回复 .osu/.mc/.osz/.mcz 格式的谱面文件。")
+            if not file_name.lower().endswith(
+                (".osu", ".mc", ".osz", ".mcz")
+            ):
+                await pattern.finish(
+                    "请回复 .osu/.mc/.osz/.mcz 格式的谱面文件。"
+                )
 
             tmp_file = CACHE_DIR / file_name
             await download_file(file_url, tmp_file)
 
             if file_name.lower().endswith((".osz", ".mcz")):
-                await pattern.send(f"已收到图包：{file_name}，正在分析，请稍候...")
-                result_rows, total = await _analyze_zip_file(tmp_file, rate=1.0)
+                await pattern.send(
+                    f"已收到图包：{file_name}，正在分析，请稍候..."
+                )
+                max_charts_val = (
+                    config.qq_max_zip_charts
+                    if platform.is_qq(bot)
+                    else None
+                )
+                result_rows, total = await _analyze_zip_file(
+                    tmp_file, rate=1.0, max_charts=max_charts_val
+                )
                 if total >= 3:
-                    avalible = sum(1 for r in result_rows if r.card_data is not None)
-                    await pattern.send(f"分析完成，有效 {avalible} / {total}")
-                chart_file = tmp_file
-                await pattern.send(f"已收到文件：{file_name}，请稍候...")
-                result_rows = [await _analyze_single_chart(chart_file, file_name, rate=1.0)]
+                    avalible = sum(
+                        1
+                        for r in result_rows
+                        if r.card_data is not None
+                    )
+                    await pattern.send(
+                        f"分析完成，有效 {avalible} / {total}"
+                    )
             else:
-                result_rows = [await _analyze_single_chart(tmp_file, file_name, rate=1.0)]
+                result_rows = [
+                    await _analyze_single_chart(
+                        tmp_file, file_name, rate=1.0
+                    )
+                ]
 
-            await _send_pattern_rows(bot, event, result_rows, detail_mode)
+            await _send_pattern_rows(
+                bot, event, result_rows, detail_mode
+            )
             await pattern.finish()
 
         elif bid is not None:
-            tmp_file, file_name = await download_file_by_id(CACHE_DIR, bid)
+            tmp_file, file_name = await download_file_by_id(
+                CACHE_DIR, bid
+            )
             chart_file = tmp_file
 
-            result_rows = [await _analyze_single_chart(chart_file, file_name, rate=1.0)]
-            await _send_pattern_rows(bot, event, result_rows, detail_mode)
+            result_rows = [
+                await _analyze_single_chart(
+                    chart_file, file_name, rate=1.0
+                )
+            ]
+            await _send_pattern_rows(
+                bot, event, result_rows, detail_mode
+            )
             await pattern.finish()
         else:
-            await pattern.finish("请回复包含 .osu/.mc/.osz/.mcz 文件的消息，或使用 bid/mania 谱面网址指定谱面。")
+            await pattern.finish(
+                "请回复包含 .osu/.mc/.osz/.mcz 文件的消息，"
+                "或使用 bid/mania 谱面网址指定谱面。"
+            )
 
     except FinishedException:
         raise
@@ -235,7 +329,8 @@ async def handle_pattern(bot: Bot, event: MessageEvent):
         if "超过" in error_text or "过大" in error_text:
             await pattern.finish(
                 f"键型分析失败：{e}\n"
-                "建议：可以删除图包内的媒体文件（音频/背景视频/图片）后再重新打包上传。"
+                "建议：可以删除图包内的媒体文件"
+                "（音频/背景视频/图片）后再重新打包上传。"
             )
         else:
             await pattern.finish(f"键型分析失败：{e}")

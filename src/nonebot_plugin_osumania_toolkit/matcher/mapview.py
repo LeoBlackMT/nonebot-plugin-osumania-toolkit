@@ -2,7 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from nonebot import on_command
+from nonebot import get_plugin_config, on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.exception import FinishedException
 
@@ -19,8 +19,12 @@ from ..render.mapview import render_analysis_card
 from ..api.download import download_file, get_file_url
 from ..api.osu import download_file_by_id
 from ..file.path import safe_filename
-
+from .. import platform
+from ..config import Config
 from ..file.cache import CACHE_DIR
+from ..render.batch import merge_images_to_grid
+
+config = get_plugin_config(Config)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "render" / "templates"
 
@@ -63,45 +67,104 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
             await download_file(file_url, tmp_file)
 
             if file_name.lower().endswith((".osz", ".mcz")):
-                await mapview.send(f"已收到图包：{file_name}，正在分析，请稍候...")
-                rows, errors, total = await analyze_mapview_zip(
-                    tmp_file, speed_rate, od_flag, cvt_flag, mod_display, CACHE_DIR
-                )
-
-                if not rows and not errors:
-                    await mapview.finish("图包中没有可分析的谱面文件。")
-                if not rows:
-                    await mapview.finish("错误:\n" + "\n".join(errors))
-
-                avalible = len(rows)
-                if total >= 3:
-                    await mapview.send(f"分析完成，有效 {avalible} / {total}，正在生成图片...")
-
-                nodes: list[Message | str] = []
-                batch_size = 5
-                for idx, row in enumerate(rows):
-                    try:
-                        image_bytes = await render_analysis_card(TEMPLATE_DIR, row["template"])
-                        nodes.append(
-                            Message(f"{row['file_name']}\n") + MessageSegment.image(image_bytes)
-                        )
-                    except Exception:
-                        nodes.append(
-                            f"{row['file_name']}:\n{format_mapview_result_text(row)}"
-                        )
-
-                    if len(nodes) >= batch_size or idx == avalible - 1:
-                        await send_forward_text_messages(bot, event, nodes)
-                        nodes = []
-                        
-                    await asyncio.sleep(0.5)  # 避免发送过快导致消息被合并或丢失
-
-                if errors:
-                    await send_forward_text_messages(
-                        bot, event, ["部分谱面分析失败:\n" + "\n".join(errors)]
+                if platform.is_qq(bot):
+                    await mapview.send(
+                        f"已收到图包：{file_name}，正在分析，请稍候..."
                     )
+                    rows, errors, total = await analyze_mapview_zip(
+                        tmp_file,
+                        speed_rate,
+                        od_flag,
+                        cvt_flag,
+                        mod_display,
+                        CACHE_DIR,
+                        max_charts=config.qq_max_zip_charts,
+                    )
+                    if not rows and not errors:
+                        await mapview.finish("图包中没有可分析的谱面文件。")
+                    if not rows:
+                        await mapview.finish("错误:\n" + "\n".join(errors))
+                    images: list[bytes] = []
+                    for row in rows:
+                        try:
+                            image_bytes = await render_analysis_card(
+                                TEMPLATE_DIR, row["template"]
+                            )
+                        except Exception:
+                            image_bytes = None
+                        if image_bytes is not None:
+                            images.append(image_bytes)
+                        else:
+                            errors.append(
+                                f"{row['file_name']} 渲染失败，已跳过"
+                            )
+                    if images:
+                        merged = merge_images_to_grid(images)
+                        await platform.send_image(bot, mapview, merged)
+                    if errors:
+                        await mapview.send(
+                            "部分谱面分析失败:\n" + "\n".join(errors)
+                        )
+                    await mapview.finish()
+                else:
+                    await mapview.send(
+                        f"已收到图包：{file_name}，正在分析，请稍候..."
+                    )
+                    rows, errors, total = await analyze_mapview_zip(
+                        tmp_file,
+                        speed_rate,
+                        od_flag,
+                        cvt_flag,
+                        mod_display,
+                        CACHE_DIR,
+                    )
+                    if not rows and not errors:
+                        await mapview.finish("图包中没有可分析的谱面文件。")
+                    if not rows:
+                        await mapview.finish("错误:\n" + "\n".join(errors))
 
-                await mapview.finish()
+                    avalible = len(rows)
+                    if total >= 3:
+                        await mapview.send(
+                            f"分析完成，有效 {avalible} / {total}，正在生成图片..."
+                        )
+
+                    nodes: list[Message | str] = []
+                    batch_size = 5
+                    for idx, row in enumerate(rows):
+                        try:
+                            image_bytes = await render_analysis_card(
+                                TEMPLATE_DIR, row["template"]
+                            )
+                            nodes.append(
+                                Message(f"{row['file_name']}\n")
+                                + MessageSegment.image(image_bytes)
+                            )
+                        except Exception:
+                            nodes.append(
+                                f"{row['file_name']}:\n"
+                                f"{format_mapview_result_text(row)}"
+                            )
+
+                        if (
+                            len(nodes) >= batch_size
+                            or idx == avalible - 1
+                        ):
+                            await send_forward_text_messages(
+                                bot, event, nodes
+                            )
+                            nodes = []
+
+                        await asyncio.sleep(0.5)  # 避免发送过快
+
+                    if errors:
+                        await send_forward_text_messages(
+                            bot,
+                            event,
+                            ["部分谱面分析失败:\n" + "\n".join(errors)],
+                        )
+
+                    await mapview.finish()
 
             else:
                 chart_file = tmp_file
@@ -116,8 +179,11 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                     CACHE_DIR,
                 )
                 try:
-                    image_bytes = await render_analysis_card(TEMPLATE_DIR, row["template"])
-                    await mapview.finish(MessageSegment.image(image_bytes))
+                    image_bytes = await render_analysis_card(
+                        TEMPLATE_DIR, row["template"]
+                    )
+                    await platform.send_image(bot, mapview, image_bytes)
+                    await mapview.finish()
                 except FinishedException:
                     raise
                 except Exception:
@@ -137,8 +203,11 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                 CACHE_DIR,
             )
             try:
-                image_bytes = await render_analysis_card(TEMPLATE_DIR, row["template"])
-                await mapview.finish(MessageSegment.image(image_bytes))
+                image_bytes = await render_analysis_card(
+                    TEMPLATE_DIR, row["template"]
+                )
+                await platform.send_image(bot, mapview, image_bytes)
+                await mapview.finish()
             except FinishedException:
                 raise
             except Exception:

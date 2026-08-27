@@ -2,7 +2,6 @@
 from .score import get_score_result
 from .state import (
     cleanup_cvtscore_state,
-    first_file_segment,
     load_chart_from_bid,
     load_chart_from_file_seg,
     load_replay_from_file_seg,
@@ -32,7 +31,6 @@ __all__ = [
     "cleanup_cvtscore_state",
     "compute_cvtscore",
     "detect_source_ruleset",
-    "first_file_segment",
     "format_cvtscore_message",
     "get_ruleset_quick_help_text",
     "load_chart_from_bid",
