@@ -55,29 +55,37 @@ async def extract_replied_file(
     return None
 
 
-async def extract_file_from_message(
+def _attachment_file(
+    attachments,
+) -> tuple[str, str] | None:
+    """从 attachments 列表取首个带 url 项 (文件名, url)。"""
+    for att in attachments or []:
+        url = getattr(att, "url", None)
+        if url:
+            return (
+                getattr(att, "filename", None) or "file",
+                url,
+            )
+    return None
+
+
+async def _segment_file(
     bot: Bot, message
 ) -> tuple[str, str] | None:
-    """任意消息中的文件（got 场景 / 用户新消息）。"""
-    # duck-typing：有 attachments 属性视为 QQ 附件
-    attachments = getattr(message, "attachments", None)
-    if attachments is not None:
-        for att in attachments:
-            url = getattr(att, "url", None)
-            if url:
-                name = getattr(att, "filename", None)
-                return (name or "file", url)
+    """从消息段（OneBot/QQ Message 容器）取 file/image 段。"""
+    if message is None:
         return None
-    # OneBot Message 遍历
     for seg in message:
-        if getattr(seg, "type", None) in ("file", "image"):
+        if getattr(seg, "type", None) in (
+            "file",
+            "image",
+        ):
             result = await get_file_url(bot, seg)
             if result is not None:
                 return result
             data = getattr(seg, "data", None) or {}
             url = data.get("url")
             if url:
-                # 段仅有 url 时兜底（QQ Message 容器段 / 部分实现）
                 name = (
                     data.get("file")
                     or data.get("name")
@@ -85,6 +93,35 @@ async def extract_file_from_message(
                     or "file"
                 )
                 return (name, url)
+    return None
+
+
+async def extract_file_from_message(
+    bot: Bot, event
+) -> tuple[str, str] | None:
+    """任意消息中的文件（got 场景）：当前消息优先，回复消息兜底。"""
+    result = _attachment_file(
+        getattr(event, "attachments", None)
+    )
+    if result is not None:
+        return result
+    result = await _segment_file(
+        bot, getattr(event, "message", None)
+    )
+    if result is not None:
+        return result
+    reply = getattr(event, "reply", None)
+    if reply is not None:
+        result = _attachment_file(
+            getattr(reply, "attachments", None)
+        )
+        if result is not None:
+            return result
+        result = await _segment_file(
+            bot, getattr(reply, "message", None)
+        )
+        if result is not None:
+            return result
     return None
 
 
