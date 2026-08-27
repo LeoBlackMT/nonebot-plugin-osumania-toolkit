@@ -131,7 +131,7 @@ async def acc_handle_first(matcher: Matcher, event: Event, state: T_State, cmd: 
         return
 
 @acc.got("handle_second")
-async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message: Message = Arg("handle_second")):
+async def acc_handle_second(matcher: Matcher, bot: Bot, event: Event, state: T_State, message: Message = Arg("handle_second")):
     """
     第二个handler:
     获取段位名、自定义物量、谱面文件或ACC输入
@@ -159,7 +159,7 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
         await acc.finish("重试次数过多，已取消操作。")
     
     # 检查用户是否发送了文件
-    file_info = await platform.extract_file_from_message(bot, message)
+    file_info = await platform.extract_file_from_message(bot, event)
     
     if file_info is not None:
         # 用户发送了文件

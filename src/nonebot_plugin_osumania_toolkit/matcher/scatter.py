@@ -2,11 +2,11 @@ import os
 import asyncio
 from pathlib import Path
 
-from nonebot.adapters import Bot, Event, Message
+from nonebot.adapters import Bot, Event
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException
 from nonebot import on_command
-from nonebot.params import Arg
+
 
 from ..file.cache import CACHE_DIR
 from ..parser.osu_file_parser import osu_file
@@ -140,7 +140,7 @@ async def handle_first(bot: Bot, event: Event, state: T_State):
         return
 
 @scatter.got("user_file")
-async def handle_file(bot: Bot, state: T_State, user_file: Message = Arg("user_file")):
+async def handle_file(bot: Bot, event: Event, state: T_State):
     
     osr_path = state["osr_path"]
     osu_path = None
@@ -159,7 +159,7 @@ async def handle_file(bot: Bot, state: T_State, user_file: Message = Arg("user_f
             pass
     
     # 检查用户是否发送了文件
-    file_info = await platform.extract_file_from_message(bot, user_file)
+    file_info = await platform.extract_file_from_message(bot, event)
     if not file_info:
         await scatter.finish("未找到谱面文件，操作已取消。")
     file_name, file_url = file_info

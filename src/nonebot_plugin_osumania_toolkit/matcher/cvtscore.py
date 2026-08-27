@@ -124,7 +124,7 @@ async def handle_cvtscore_first(bot: Bot, event: Event, state: T_State):
 
 
 @cvtscore.got("user_input")
-async def handle_cvtscore_interactive(bot: Bot, state: T_State, user_input: Message = Arg("user_input")):
+async def handle_cvtscore_interactive(bot: Bot, event: Event, state: T_State, user_input: Message = Arg("user_input")):
     if state.get("status") in {"Fail", "Finish"}:
         await cleanup_cvtscore_state(state)
         await cvtscore.finish()
@@ -142,7 +142,7 @@ async def handle_cvtscore_interactive(bot: Bot, state: T_State, user_input: Mess
         await cvtscore.finish("已取消操作。")
 
     stage = str(state.get("stage") or "need_replay")
-    file_info = await platform.extract_file_from_message(bot, user_input)
+    file_info = await platform.extract_file_from_message(bot, event)
 
     try:
         if stage == "need_replay":

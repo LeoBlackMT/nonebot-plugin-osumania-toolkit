@@ -139,7 +139,7 @@ async def handle_first(bot: Bot, event: Event, state: T_State):
         return
 
 @analyze.got("user_file")
-async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_file")):
+async def handle_file(bot: Bot, event: Event, state: T_State, user_msg: Message = Arg("user_file")):
     # 从 state 中取回之前保存的对象
     osr = state["osr"]
     osr_path = state["osr_path"]
@@ -158,7 +158,7 @@ async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_fi
         await analyze.finish()
 
     # 检查用户是否发送了文件
-    file_info = await platform.extract_file_from_message(bot, user_msg)
+    file_info = await platform.extract_file_from_message(bot, event)
 
     if not file_info:
         text = user_msg.extract_plain_text().strip()
