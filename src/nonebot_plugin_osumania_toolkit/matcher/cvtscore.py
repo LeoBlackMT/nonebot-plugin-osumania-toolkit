@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent
+from nonebot.adapters import Bot, Event, Message
 from nonebot.exception import FinishedException, RejectedException
 from nonebot.params import Arg
 from nonebot.typing import T_State
@@ -47,7 +47,7 @@ async def _finish_with_cvtscore_result(bot: Bot, payload: dict | None):
 
 
 @cvtscore.handle()
-async def handle_cvtscore_first(bot: Bot, event: MessageEvent, state: T_State):
+async def handle_cvtscore_first(bot: Bot, event: Event, state: T_State):
     state["status"] = "init"
     state["reject_time"] = 0
     state["bid_loaded"] = False
@@ -78,29 +78,28 @@ async def handle_cvtscore_first(bot: Bot, event: MessageEvent, state: T_State):
     state["target_spec"] = ruleset_spec
 
     try:
-        if event.reply:
-            file_info = await platform.extract_replied_file(bot, event)
-            if file_info is not None:
-                file_name, file_url = file_info
-                replay_err = await load_replay_from_file_seg(
+        file_info = await platform.extract_replied_file(bot, event)
+        if file_info is not None:
+            file_name, file_url = file_info
+            replay_err = await load_replay_from_file_seg(
+                bot, file_name, file_url, state, CACHE_DIR
+            )
+            if replay_err is None:
+                await cvtscore.send("已识别回复中的回放文件。")
+            else:
+                chart_err = await load_chart_from_file_seg(
                     bot, file_name, file_url, state, CACHE_DIR
                 )
-                if replay_err is None:
-                    await cvtscore.send("已识别回复中的回放文件。")
+                if chart_err is None:
+                    await cvtscore.send("已识别回复中的谱面文件。")
                 else:
-                    chart_err = await load_chart_from_file_seg(
-                        bot, file_name, file_url, state, CACHE_DIR
+                    state["status"] = "Fail"
+                    await cleanup_cvtscore_state(state)
+                    await cvtscore.finish(
+                        "回复消息中的文件既不是有效回放也不是有效谱面。\n"
+                        f"回放错误: {replay_err}\n"
+                        f"谱面错误: {chart_err}"
                     )
-                    if chart_err is None:
-                        await cvtscore.send("已识别回复中的谱面文件。")
-                    else:
-                        state["status"] = "Fail"
-                        await cleanup_cvtscore_state(state)
-                        await cvtscore.finish(
-                            "回复消息中的文件既不是有效回放也不是有效谱面。\n"
-                            f"回放错误: {replay_err}\n"
-                            f"谱面错误: {chart_err}"
-                        )
 
         ready, prompt = await prepare_cvtscore_state(state, CACHE_DIR)
         if not ready:

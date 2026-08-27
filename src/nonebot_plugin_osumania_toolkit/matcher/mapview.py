@@ -3,7 +3,8 @@ import os
 from pathlib import Path
 
 from nonebot import get_plugin_config, on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
+from nonebot.adapters import Bot, Event
+from nonebot.adapters.onebot.v11 import Message as OBMessage, MessageSegment
 from nonebot.exception import FinishedException
 
 from ..algorithm.mapview import (
@@ -16,7 +17,7 @@ from ..algorithm.pattern import PatternNotManiaError, PatternParseError
 from ..algorithm.estimator.exceptions import ParseError, NotManiaError
 from ..algorithm.utils import parse_cmd, send_forward_text_messages
 from ..render.mapview import render_analysis_card
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.path import safe_filename
 from .. import platform
@@ -33,7 +34,7 @@ mapview = on_command("mapview", aliases={"rework"}, block=True)
 
 
 @mapview.handle()
-async def handle_mapview(bot: Bot, event: MessageEvent):
+async def handle_mapview(bot: Bot, event: Event):
     cmd_text = event.get_plaintext().strip()
     speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg = parse_cmd(cmd_text)
 
@@ -44,20 +45,8 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
     chart_file: Path | None = None
 
     try:
-        if event.reply:
-            file_seg = None
-            for seg in event.reply.message:
-                if seg.type == "file":
-                    file_seg = seg
-                    break
-
-            if not file_seg:
-                await mapview.finish("回复的消息中没有找到文件。")
-
-            file_info = await get_file_url(bot, file_seg)
-            if not file_info:
-                await mapview.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
+        file_info = await platform.extract_replied_file(bot, event)
+        if file_info:
             file_name, file_url = file_info
             file_name = safe_filename(os.path.basename(file_name))
             if not file_name.lower().endswith((".osu", ".mc", ".osz", ".mcz")):
@@ -129,7 +118,7 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                             f"分析完成，有效 {avalible} / {total}，正在生成图片..."
                         )
 
-                    nodes: list[Message | str] = []
+                    nodes: list[OBMessage | str] = []
                     batch_size = 5
                     for idx, row in enumerate(rows):
                         try:
@@ -137,7 +126,7 @@ async def handle_mapview(bot: Bot, event: MessageEvent):
                                 TEMPLATE_DIR, row["template"]
                             )
                             nodes.append(
-                                Message(f"{row['file_name']}\n")
+                                OBMessage(f"{row['file_name']}\n")
                                 + MessageSegment.image(image_bytes)
                             )
                         except Exception:

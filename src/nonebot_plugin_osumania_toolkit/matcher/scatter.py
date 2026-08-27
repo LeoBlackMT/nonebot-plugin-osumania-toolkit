@@ -2,7 +2,7 @@ import os
 import asyncio
 from pathlib import Path
 
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
+from nonebot.adapters import Bot, Event, Message
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException
 from nonebot import on_command
@@ -27,7 +27,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 scatter = on_command("scatter", aliases={"散点"})
 
 @scatter.handle()
-async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
+async def handle_first(bot: Bot, event: Event, state: T_State):
     
     state["status"] = "init"
     
@@ -39,14 +39,6 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
     
     if not bid:
         await scatter.finish("请回复一条包含回放文件的消息，同时使用 b<谱面ID> 指定谱面。")
-
-    if not event.reply:
-        if bid is None:
-            state["status"] = "Fail"
-            await scatter.finish("请回复一条包含回放文件的消息，同时使用 b<谱面ID> 指定谱面。")
-        else:
-            state["status"] = "Fail"
-            await scatter.finish("请回复一条包含回放文件的消息。")
 
     file_info = await platform.extract_replied_file(bot, event)
     if not file_info:

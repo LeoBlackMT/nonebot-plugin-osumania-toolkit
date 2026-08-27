@@ -1,5 +1,5 @@
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import MessageEvent, Bot
+from nonebot.adapters import Bot, Event
 from nonebot.exception import FinishedException
 
 from ..data.help import omtk_help_data
@@ -9,7 +9,7 @@ from .. import platform
 omtk = on_command("omtk")
 
 @omtk.handle()
-async def handle_omtk(bot: Bot, event: MessageEvent):
+async def handle_omtk(bot: Bot, event: Event):
 
     try:
         cmd = event.get_plaintext().strip().split()

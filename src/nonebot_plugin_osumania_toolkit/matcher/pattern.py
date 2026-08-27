@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from nonebot import get_plugin_config, on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
+from nonebot.adapters import Bot, Event
+from nonebot.adapters.onebot.v11 import Message as OBMessage, MessageSegment
 from nonebot.exception import FinishedException
 
 from ..algorithm.conversion import convert_mc_to_osu
@@ -26,7 +27,7 @@ from ..algorithm.utils import (
     resolve_meta_data,
     send_forward_text_messages,
 )
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.path import safe_filename
 from .. import platform
@@ -62,7 +63,7 @@ def _fallback_text_rows(rows: list[PatternOutputRow]) -> list[str]:
 
 async def _send_pattern_rows(
     bot: Bot,
-    event: MessageEvent,
+    event: Event,
     rows: list[PatternOutputRow],
     detail_mode: bool,
 ) -> None:
@@ -116,13 +117,13 @@ async def _send_pattern_rows(
             await pattern.send(MessageSegment.image(image_bytes))
             return
 
-        image_nodes: list[Message] = []
+        image_nodes: list[OBMessage] = []
         for row in rows:
             image_bytes = await render_pattern_card(
                 row.card_data or {}, TEMPLATE_DIR
             )
             image_nodes.append(
-                Message(f"{row.file_name}\n")
+                OBMessage(f"{row.file_name}\n")
                 + MessageSegment.image(image_bytes)
             )
 
@@ -227,7 +228,7 @@ async def _analyze_zip_file(
 
 
 @pattern.handle()
-async def handle_pattern(bot: Bot, event: MessageEvent):
+async def handle_pattern(bot: Bot, event: Event):
     cmd_text = event.get_plaintext().strip()
     detail_mode = _is_detail_mode(cmd_text)
     _, _, _, bid, _, _ = parse_cmd(cmd_text)
@@ -237,21 +238,8 @@ async def handle_pattern(bot: Bot, event: MessageEvent):
     result_rows: list[PatternOutputRow] = []
 
     try:
-        if event.reply:
-            reply = event.reply
-            file_seg = None
-            for seg in reply.message:
-                if seg.type == "file":
-                    file_seg = seg
-                    break
-
-            if not file_seg:
-                await pattern.finish("回复的消息中没有找到文件。")
-
-            file_info = await get_file_url(bot, file_seg)
-            if not file_info:
-                await pattern.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
+        file_info = await platform.extract_replied_file(bot, event)
+        if file_info:
             file_name, file_url = file_info
             file_name = safe_filename(os.path.basename(file_name))
             if not file_name.lower().endswith(

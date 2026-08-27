@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot.adapters import Bot, Event
 from nonebot.log import logger
 
 from ..parser.osr_file_parser import osr_file
@@ -23,10 +23,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 spectrum = on_command("spectrum", aliases={"频谱"})
 
 @spectrum.handle()
-async def handle_spectrum(bot: Bot, event: MessageEvent):
-    if not event.reply:
-        await spectrum.finish("请回复一条包含回放文件的消息。")
-
+async def handle_spectrum(bot: Bot, event: Event):
     file_info = await platform.extract_replied_file(bot, event)
     if not file_info:
         await spectrum.finish("回复的消息中没有找到文件。")

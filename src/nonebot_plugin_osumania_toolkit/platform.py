@@ -74,6 +74,17 @@ async def extract_file_from_message(
             result = await get_file_url(bot, seg)
             if result is not None:
                 return result
+            data = getattr(seg, "data", None) or {}
+            url = data.get("url")
+            if url:
+                # 段仅有 url 时兜底（QQ Message 容器段 / 部分实现）
+                name = (
+                    data.get("file")
+                    or data.get("name")
+                    or data.get("filename")
+                    or "file"
+                )
+                return (name, url)
     return None
 
 

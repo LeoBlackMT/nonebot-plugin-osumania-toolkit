@@ -5,7 +5,7 @@ from pathlib import Path
 
 from nonebot import on_command
 from nonebot.params import Arg, CommandArg
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
+from nonebot.adapters import Bot, Event, Message
 from nonebot.matcher import Matcher
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException, RejectedException
@@ -35,7 +35,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 acc = on_command("acc", aliases={"单曲"}, block=True)
 
 @acc.handle()
-async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State, cmd: Message = CommandArg()):
+async def acc_handle_first(matcher: Matcher, event: Event, state: T_State, cmd: Message = CommandArg()):
     cmd_text = event.get_plaintext().strip()
     dan_name, acc_str, bid, num_songs, sv2_flag, reverse_flag, error_msg = parse_acc_cmd(cmd_text)
     

@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot.adapters import Bot, Event
 from nonebot.log import logger
 
 from ..parser.osr_file_parser import osr_file
@@ -20,10 +20,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 lifebar = on_command("lifebar", aliases={"血条", "life"})
 
 @lifebar.handle()
-async def handle_lifebar(bot: Bot, event: MessageEvent):
-    if not event.reply:
-        await lifebar.finish("请回复一条包含 .osr 文件的消息。")
-
+async def handle_lifebar(bot: Bot, event: Event):
     file_info = await platform.extract_replied_file(bot, event)
     if not file_info:
         await lifebar.finish("回复的消息中没有找到文件。")

@@ -2,7 +2,7 @@ import os
 import asyncio
 from pathlib import Path
 
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
+from nonebot.adapters import Bot, Event, Message
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException
 from nonebot import on_command
@@ -28,7 +28,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 analyze = on_command("analyze", aliases={"分析", "analyse"}, block=True)
 
 @analyze.handle()
-async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
+async def handle_first(bot: Bot, event: Event, state: T_State):
     
     state["status"] = "init"
 
@@ -38,14 +38,6 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
     if cmd_err_msg:
         state["status"] = "Fail"
         await analyze.finish("错误:\n" + "\n".join(cmd_err_msg) + "\n请检查命令格式并重试。")
-
-    if not event.reply:
-        if bid is None:
-            state["status"] = "Fail"
-            await analyze.finish("请回复一条包含回放文件的消息，或使用 b<谱面ID> 指定谱面。")
-        else:
-            state["status"] = "Fail"
-            await analyze.finish("请回复一条包含回放文件的消息。")
 
     file_info = await platform.extract_replied_file(bot, event)
     if not file_info:

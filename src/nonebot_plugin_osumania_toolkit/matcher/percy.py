@@ -2,7 +2,8 @@ import asyncio
 import os
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
+from nonebot.adapters import Bot, Event
+from nonebot.adapters.onebot.v11 import MessageSegment as OBMessageSegment
 from nonebot.exception import FinishedException
 
 from ..file.cache import CACHE_DIR
@@ -17,10 +18,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 percy = on_command("percy", aliases={"投皮"}, block=True)
 
 @percy.handle()
-async def handle_percy(bot: Bot, event: MessageEvent):
-    if not event.reply:
-        await percy.finish("请回复一条包含图片文件的消息。")
-
+async def handle_percy(bot: Bot, event: Event):
     file_info = await platform.extract_replied_file(bot, event)
     if not file_info:
         await percy.finish("回复的消息中没有找到图片文件。")
@@ -64,7 +62,7 @@ async def handle_percy(bot: Bot, event: MessageEvent):
             )
         except Exception:
             if not platform.is_qq(bot):
-                file_seg = MessageSegment("file", {
+                file_seg = OBMessageSegment("file", {
                     "file": output_path.resolve().as_uri(),
                     "name": output_path.name,
                 })
