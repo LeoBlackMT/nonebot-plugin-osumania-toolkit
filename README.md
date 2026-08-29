@@ -109,22 +109,7 @@
 ## QQ 官方机器人（双适配器）说明
 
 本插件支持 OneBot v11（如 NapCat / go-cqhttp）与 QQ 官方机器人 API（nonebot-adapter-qq）双适配器共存，可在同一进程内同时接入两个通道、各自独立收发。
-
-在 nonebot2 项目中同时注册两个适配器即可（以 `pyproject.toml` 的 `[tool.nonebot]` 为例）：
-
-    adapters = [
-        { name = "OneBot V11", module_name = "nonebot.adapters.onebot.v11" },
-        { name = "QQ 官方", module_name = "nonebot.adapters.qq" },
-    ]
-
 QQ 适配器的 AppID/密钥等连接配置请参考 [nonebot-adapter-qq](https://github.com/nonebot/adapter-qq) 文档。
-
-**QQ 官方通道注意事项**:
-
-1. 群聊中机器人默认只收到被 @ 的消息；如需响应不带 @ 的命令，请在 QQ 群设置中开启「获取群内全部消息」，并在开放平台启用 `GROUP_MESSAGE_CREATE` 事件订阅。
-2. 被动回复频控：群聊每条消息 5 分钟内最多回复 5 次、单聊 60 分钟内最多 4 次。插件在 QQ 通道的单次命令回复均控制在 3 条以内，并自动省略中间进度提示。
-3. QQ 官方 API 不支持合并转发消息，图包等多图结果在 QQ 通道自动拼接为长图发送（图片体积超过 8MB 时自动转为 JPEG）。
-4. 受被动消息次数限制，QQ 通道下图包分析上限为 `qq_max_zip_charts`（默认 10），超出部分截断并附带说明；OneBot v11 通道不受影响，继续跟随 `batch_max_charts`。
 
 ## 参考内容
 - [Suuny Rework](https://github.com/sunnyxxy/Star-Rating-Rebirth): 使用了Suuny Rework的算法进行难度估计。
