@@ -5,7 +5,9 @@ from typing import Any, Optional
 from nonebot import require
 
 require("nonebot_plugin_htmlkit")
-from nonebot_plugin_htmlkit import template_to_pic
+from nonebot_plugin_htmlkit import html_to_pic
+
+from ._template_cache import get_template_env
 
 _FUTURE_NOT_READY_TEXT = "Future object is not initialized"
 _CVTSCORE_RENDER_LOCK = asyncio.Lock()
@@ -19,10 +21,11 @@ async def _render_cvtscore_card_once(template_dir: Path, data: dict[str, Any]) -
     # card_height = min(620, max(450, card_height))
     card_height = 400
 
-    return await template_to_pic(
-        template_path=template_dir,
-        template_name=_CVTSCORE_TEMPLATE_NAME,
-        templates=data,
+    template = get_template_env(template_dir).get_template(_CVTSCORE_TEMPLATE_NAME)
+    html = await template.render_async(**data)
+    return await html_to_pic(
+        html=html,
+        base_url=f"file://{template_dir.as_posix()}/",
         max_width=475,
         device_height=card_height,
         allow_refit=False,

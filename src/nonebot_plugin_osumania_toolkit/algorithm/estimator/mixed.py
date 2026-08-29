@@ -241,6 +241,7 @@ def _try_run_roxy_fallback(
     od_flag: Any,
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
+    chart: Any = None,
 ) -> dict[str, Any] | None:
     # Roxy 入口吃谱面文本，此分支始终按文本路径自建解析。
     try:
@@ -255,6 +256,7 @@ def _try_run_roxy_fallback(
             od_flag,
             cvt_flag,
             precomputed_sunny_result=sunny_result,
+            chart=chart,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -360,7 +362,9 @@ def estimate_mixed_result(
     companella_plan: dict[str, Any] | None = None
 
     if mixed_mode_tag == "RC":
-        roxy_result = _try_run_roxy_fallback(source, speed_rate, od_flag, cvt_flag, sunny)
+        roxy_result = _try_run_roxy_fallback(
+            source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
+        )
         if can_use_rc_result(roxy_result):
             selected_result = roxy_result
             actual_algorithm = "Roxy"

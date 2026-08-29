@@ -180,7 +180,13 @@ async def analyze_mapview_chart(
         detail = _format_parse_error_detail(e)
         raise PatternParseError(f"键型解析阶段失败: {detail}") from e
 
-    meta_data = resolve_meta_data(target_file, target_name)
+    # 复用已解析的 base_chart 元信息，避免对同一文件重复解析。
+    meta_data = getattr(base_chart, "meta_data", None)
+    if not (
+        isinstance(meta_data, dict)
+        and {"Creator", "Artist", "Title", "Version"}.issubset(meta_data)
+    ):
+        meta_data = resolve_meta_data(target_file, target_name)
 
     merged_clusters = _merge_duplicate_clusters(pattern_result.report.Clusters)
     top_five = merged_clusters[:5]
