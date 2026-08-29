@@ -3,7 +3,9 @@ import asyncio
 from nonebot import require
 
 require("nonebot_plugin_htmlkit")
-from nonebot_plugin_htmlkit import template_to_pic
+from nonebot_plugin_htmlkit import html_to_pic
+
+from ._template_cache import get_template_env
 
 from pathlib import Path
 from typing import Any
@@ -18,10 +20,11 @@ def default_template_dir() -> Path:
 
 
 async def _render_pattern_card_once(template_dir: Path, data: dict[str, Any]) -> bytes:
-    return await template_to_pic(
-        template_path=template_dir,
-        template_name=_TEMPLATE_NAME,
-        templates=data,
+    template = get_template_env(template_dir).get_template(_TEMPLATE_NAME)
+    html = await template.render_async(**data)
+    return await html_to_pic(
+        html=html,
+        base_url=f"file://{template_dir.as_posix()}/",
         max_width=475,
         device_height=520,
         allow_refit=False,

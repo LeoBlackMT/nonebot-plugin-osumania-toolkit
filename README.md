@@ -94,6 +94,20 @@
 6. 如果你有任何问题或建议，欢迎提交issue或pr。
 
 
+## 已知问题
+
+### 图包分析时进程段错误崩溃（htmlkit 0.1.0rc5 × uvloop）
+
+**症状**: 图包（.osz/.mcz）批量分析并渲染结果卡片时，若图包内谱面过多或计算量过大，nonebot 进程以段错误（SIGSEGV）退出，NapCat 与 QQ 官方通道均会触发；同一谱面在标准 asyncio 事件循环下不崩、启用 uvloop 后稳定复现。崩溃点位于 CPython 的 GC 扫描或编译器对象分配（dmesg 中为同一指令地址的 `_PyObject_GC_New`/GC 阶段 UAF）。
+
+**原因**: `nonebot-plugin-htmlkit`（0.1.0rc5）的原生渲染扩展（`core.abi3.so`/`core.pyd`）在跨线程桥接 Python 对象（Future/bytes/回调）时存在引用计数缺陷（use-after-free）；**uvloop 事件循环会放大该竞态窗口使崩溃稳定复现**。
+
+**规避**: 在部署环境中卸载 uvloop，uvicorn 将自动回退标准 asyncio 事件循环：
+
+    pip uninstall uvloop
+
+**跟踪**: 待 [nonebot-plugin-htmlkit](https://github.com/nonebot/plugin-htmlkit) 上游修复后恢复默认配置；本项目将 htmlkit 锁定在 `<0.2.0`，解除锁定前需先验证渲染输出兼容性。
+
 ## 配置说明
 | 配置项 | 是否必填 | 类型 | 默认值 | 说明 |
 |:-----:|:----:|:----:|:----:|:----:|

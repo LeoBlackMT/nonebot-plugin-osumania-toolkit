@@ -1334,6 +1334,7 @@ def _build_reference_predictions(
     *,
     precomputed_sunny_result: dict[str, Any] | None = None,
     precomputed_daniel_result: dict[str, Any] | None = None,
+    chart: Any = None,
 ) -> dict[str, Any]:
     # JS L1167-1203 直译（wantsGraph 恒为 False，graph 不产出）。
     from .azusa import estimate_azusa_result
@@ -1344,11 +1345,13 @@ def _build_reference_predictions(
         precomputed_sunny_result
         if precomputed_sunny_result
         else _safe_reference(
-            lambda: estimate_sunny_result(source, speed_rate, od_flag, cvt_flag)
+            lambda: estimate_sunny_result(
+                source, speed_rate, od_flag, cvt_flag, chart=chart
+            )
         )
     )
     daniel_result = precomputed_daniel_result or _safe_reference(
-        lambda: estimate_daniel_result(source, speed_rate, od_flag, cvt_flag)
+        lambda: estimate_daniel_result(source, speed_rate, od_flag, cvt_flag, chart=chart)
     )
     azusa_result = _safe_reference(
         lambda: estimate_azusa_result(
@@ -1359,6 +1362,7 @@ def _build_reference_predictions(
             sunny_result=sunny_result,
             daniel_result=daniel_result,
             force_sunny_reference_ho=False,
+            chart=chart,
         )
     )
 
@@ -1788,6 +1792,7 @@ def run_roxy_estimator_from_text(
     cvt_flag: Any = None,
     *,
     precomputed_sunny_result: dict[str, Any] | None = None,
+    chart: Any = None,
 ) -> dict[str, Any]:
     """JS ``runRoxyEstimatorFromText`` 直译。
 
@@ -1870,6 +1875,7 @@ def run_roxy_estimator_from_text(
                 ROXY_OD_NEUTRAL,
                 cvt_flag,
                 structural_numeric,
+                chart=chart,
             )
             meta_features = _build_roxy_meta_features(
                 meta_predictions, numeric_details, curve, structural_numeric
