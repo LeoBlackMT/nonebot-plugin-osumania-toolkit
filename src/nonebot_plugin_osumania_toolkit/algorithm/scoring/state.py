@@ -8,7 +8,7 @@ from typing import Any
 
 from ..conversion import convert_mc_to_osu, convert_mr_to_osr
 from ..utils import is_mc_file
-from ...api.download import download_file, get_file_url
+from ...api.download import download_file
 from ...api.osu import download_file_by_id
 from ...file.cleanup import cleanup_paths
 from ...file.path import safe_filename
@@ -19,13 +19,6 @@ from ...parser.osu_file_parser import osu_file
 from .ruleset import get_ruleset_quick_help_text, parse_cvtscore_cmd, resolve_target_ruleset, detect_source_ruleset
 from .convert import compute_cvtscore, format_cvtscore_message
 from .card import build_cvtscore_card_data, validate_replay_status, validate_chart_status
-
-
-def first_file_segment(message: Any):
-    for seg in message:
-        if getattr(seg, "type", None) == "file":
-            return seg
-    return None
 
 
 def all_cleanup_targets(state: dict[str, Any]) -> tuple[Path | str | None, ...]:
@@ -40,12 +33,10 @@ async def cleanup_cvtscore_state(state: dict[str, Any]) -> None:
     asyncio.create_task(cleanup_paths(*all_cleanup_targets(state)))
 
 
-async def load_replay_from_file_seg(bot: Any, file_seg: Any, state: dict[str, Any], cache_dir: Path) -> str | None:
-    file_info = await get_file_url(bot, file_seg)
-    if not file_info:
-        return "无法获取文件信息。请确保机器人有权限访问该文件。"
-
-    file_name, file_url = file_info
+async def load_replay_from_file_seg(
+    bot: Any, file_name: str, file_url: str,
+    state: dict[str, Any], cache_dir: Path,
+) -> str | None:
     file_name = os.path.basename(file_name)
     lower_name = file_name.lower()
 
@@ -92,12 +83,10 @@ async def load_replay_from_file_seg(bot: Any, file_seg: Any, state: dict[str, An
     return None
 
 
-async def load_chart_from_file_seg(bot: Any, file_seg: Any, state: dict[str, Any], cache_dir: Path) -> str | None:
-    file_info = await get_file_url(bot, file_seg)
-    if not file_info:
-        return "无法获取文件信息。请确保机器人有权限访问该文件。"
-
-    file_name, file_url = file_info
+async def load_chart_from_file_seg(
+    bot: Any, file_name: str, file_url: str,
+    state: dict[str, Any], cache_dir: Path,
+) -> str | None:
     file_name = os.path.basename(file_name)
     lower_name = file_name.lower()
 

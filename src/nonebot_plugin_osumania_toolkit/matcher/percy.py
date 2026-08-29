@@ -2,36 +2,27 @@ import asyncio
 import os
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
+from nonebot.adapters import Bot, Event
+from nonebot.adapters.onebot.v11 import MessageSegment as OBMessageSegment
 from nonebot.exception import FinishedException
 
 from ..file.cache import CACHE_DIR
 from ..file.path import safe_filename
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..file.cleanup import cleanup_temp_file
 from ..algorithm.percy import get_current_d, process_ln_image, parse_percy_cmd, LNImageError
+from .. import platform
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 percy = on_command("percy", aliases={"投皮"}, block=True)
 
 @percy.handle()
-async def handle_percy(bot: Bot, event: MessageEvent):
-    if not event.reply:
-        await percy.finish("请回复一条包含图片文件的消息。")
-
-    reply = event.reply
-    img_seg = None
-    for seg in reply.message:
-        if seg.type == "file":
-            img_seg = seg
-            break
-        if seg.type == "image":
-            img_seg = seg
-            break
-
-    if not img_seg:
+async def handle_percy(bot: Bot, event: Event):
+    file_info = await platform.extract_replied_file(bot, event)
+    if not file_info:
         await percy.finish("回复的消息中没有找到图片文件。")
+    file_name, file_url = file_info
         
     cmd_text = event.get_plaintext().strip()
     d, lzr_flag, err_msg = parse_percy_cmd(cmd_text)
@@ -40,12 +31,6 @@ async def handle_percy(bot: Bot, event: MessageEvent):
         
     mode_text = "Lazer)约" if lzr_flag else "Stable)"
 
-    # 使用辅助函数获取文件信息
-    file_info = await get_file_url(bot, img_seg)
-    if not file_info:
-        await percy.finish("无法获取图片信息。请确保机器人有权限访问该图片，或者图片有效。")
-
-    file_name, file_url = file_info
     file_name = os.path.basename(file_name)
     if not file_name.lower().endswith(".png"):
         await percy.finish("请回复 .png 格式的图片。")
@@ -69,15 +54,21 @@ async def handle_percy(bot: Bot, event: MessageEvent):
         
         await process_ln_image(file_path, d, lzr_flag, output_path)
 
-        # 先按普通图片发送，失败则降级为文件发送
+        # 先按普通图片发送，失败则降级
         try:
-            await percy.send(MessageSegment.image(output_path.resolve().as_uri()), at_sender=True)
+            img_bytes = output_path.read_bytes()
+            await platform.send_image(
+                bot, percy, img_bytes, at_sender=True
+            )
         except Exception:
-            file_seg = MessageSegment("file", {
-                "file": output_path.resolve().as_uri(),
-                "name": output_path.name,
-            })
-            await percy.send(file_seg, at_sender=True)
+            if not platform.is_qq(bot):
+                file_seg = OBMessageSegment("file", {
+                    "file": output_path.resolve().as_uri(),
+                    "name": output_path.name,
+                })
+                await percy.send(file_seg, at_sender=True)
+            else:
+                await percy.send("图片处理完成，但发送失败。")
 
     except FinishedException:
         pass

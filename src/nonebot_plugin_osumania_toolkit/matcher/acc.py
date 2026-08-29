@@ -5,16 +5,17 @@ from pathlib import Path
 
 from nonebot import on_command
 from nonebot.params import Arg, CommandArg
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message
+from nonebot.adapters import Bot, Event, Message
 from nonebot.matcher import Matcher
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException, RejectedException
 
 from ..file.cache import CACHE_DIR
 from ..file.path import safe_filename
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.cleanup import cleanup_paths
+from .. import platform
 from ..algorithm.acc import (
     calculate_acc_from_dan, 
     calculate_acc,
@@ -34,7 +35,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 acc = on_command("acc", aliases={"单曲"}, block=True)
 
 @acc.handle()
-async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State, cmd: Message = CommandArg()):
+async def acc_handle_first(matcher: Matcher, event: Event, state: T_State, cmd: Message = CommandArg()):
     cmd_text = event.get_plaintext().strip()
     dan_name, acc_str, bid, num_songs, sv2_flag, reverse_flag, error_msg = parse_acc_cmd(cmd_text)
     
@@ -130,7 +131,7 @@ async def acc_handle_first(matcher: Matcher, event: MessageEvent, state: T_State
         return
 
 @acc.got("handle_second")
-async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message: Message = Arg("handle_second")):
+async def acc_handle_second(matcher: Matcher, bot: Bot, event: Event, state: T_State, message: Message = Arg("handle_second")):
     """
     第二个handler:
     获取段位名、自定义物量、谱面文件或ACC输入
@@ -158,19 +159,10 @@ async def acc_handle_second(matcher: Matcher, bot: Bot, state: T_State, message:
         await acc.finish("重试次数过多，已取消操作。")
     
     # 检查用户是否发送了文件
-    file_seg = None
-    for seg in message:
-        if seg.type == "file":
-            file_seg = seg
-            break
+    file_info = await platform.extract_file_from_message(bot, event)
     
-    if file_seg:
+    if file_info is not None:
         # 用户发送了文件
-        file_info = await get_file_url(bot, file_seg)
-        if not file_info:
-            state["status"] = "Fail"
-            await acc.finish("无法获取文件信息。")
-        
         file_name, file_url = file_info
         file_name = os.path.basename(file_name)
         

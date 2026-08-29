@@ -201,6 +201,7 @@ async def analyze_ett_zip(
     mod_display: str,
     cache_dir: Path,
     score_goal: float = DEFAULT_SCORE_GOAL,
+    max_charts: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], int]:
     temp_dir = cache_dir / f"ett_batch_{int(time.time())}_{os.getpid()}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -221,7 +222,11 @@ async def analyze_ett_zip(
 
         total = len(chart_files)
         
-        max_charts = config.batch_max_charts
+        max_charts = (
+            max_charts
+            if max_charts is not None
+            else config.batch_max_charts
+        )
         if max_charts > 0 and total > max_charts:
             chart_files = chart_files[:max_charts]
 

@@ -250,7 +250,8 @@ async def analyze_mapview_zip(
     cvt_flag: list[str],
     mod_display: str,
     cache_dir: Path,
-) -> tuple[list[dict[str, Any]], list[str]]:
+    max_charts: int | None = None,
+) -> tuple[list[dict[str, Any]], list[str], int]:
     temp_dir = cache_dir / f"mapview_batch_{int(time.time())}_{os.getpid()}"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -262,14 +263,22 @@ async def analyze_mapview_zip(
             chart_files = await asyncio.to_thread(extract_zip_file, zip_file, temp_dir)
         except Exception as e:
             errors.append(f"图包分析失败 - {e}")
-            return results, errors, []
+            return results, errors, 0
 
         if not chart_files:
             errors.append("图包中没有可分析的谱面文件。")
-            return results, errors, []
+            return results, errors, 0
         total = len(chart_files)
         # 限制单次处理谱面数量，避免长时间阻塞
-        max_charts = config.batch_max_charts if config.batch_max_charts > 0 else len(chart_files)
+        max_charts = (
+            max_charts
+            if max_charts is not None
+            else (
+                config.batch_max_charts
+                if config.batch_max_charts > 0
+                else len(chart_files)
+            )
+        )
         if len(chart_files) > max_charts:
             errors.append(
                 f"图包包含 {len(chart_files)} 个谱面，超过单次处理谱面数量 {max_charts} 个。"

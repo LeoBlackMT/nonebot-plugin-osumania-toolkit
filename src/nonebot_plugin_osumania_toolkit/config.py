@@ -15,6 +15,9 @@ class Config(BaseModel):
     # 图包批量分析单次最多处理谱面数，默认 15 个，设置为 0 时表示无限制。
     batch_max_charts: int = 15
     
+    # QQ 官方适配器下单个图包最多分析谱面数，默认 10 个（受被动消息次数限制）。
+    qq_max_zip_charts: int = 10
+    
     # .mc 转 .osu 的默认 OverallDifficulty 和 HPDrainRate
     default_convert_od: int = 8
     default_convert_hp: int = 8

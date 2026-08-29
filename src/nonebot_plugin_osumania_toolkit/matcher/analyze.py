@@ -2,7 +2,7 @@ import os
 import asyncio
 from pathlib import Path
 
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment, Message
+from nonebot.adapters import Bot, Event, Message
 from nonebot.typing import T_State
 from nonebot.exception import FinishedException
 from nonebot import on_command
@@ -15,19 +15,20 @@ from ..parser.mr_file_parser import mr_file
 
 from ..render.comprehensive import run_plot_comprehensive
 from ..file.path import safe_filename
-from ..api.download import download_file, get_file_url
+from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.cleanup import cleanup_temp_file
 from ..algorithm.utils import parse_bid_or_url, parse_cmd, is_mc_file
 from ..algorithm.detector import run_analyze_cheating, format_analyze_result
 from ..algorithm.conversion import convert_mr_to_osr, convert_mc_to_osu
+from .. import platform
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 analyze = on_command("analyze", aliases={"分析", "analyse"}, block=True)
 
 @analyze.handle()
-async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
+async def handle_first(bot: Bot, event: Event, state: T_State):
     
     state["status"] = "init"
 
@@ -38,30 +39,10 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
         state["status"] = "Fail"
         await analyze.finish("错误:\n" + "\n".join(cmd_err_msg) + "\n请检查命令格式并重试。")
 
-    if not event.reply:
-        if bid is None:
-            state["status"] = "Fail"
-            await analyze.finish("请回复一条包含回放文件的消息，或使用 b<谱面ID> 指定谱面。")
-        else:
-            state["status"] = "Fail"
-            await analyze.finish("请回复一条包含回放文件的消息。")
-    reply = event.reply
-    file_seg = None
-    for seg in reply.message:
-        if seg.type == "file":
-            file_seg = seg
-            break
-
-    if not file_seg:
-        state["status"] = "Fail"
-        await analyze.finish("回复的消息中没有找到文件。")
-
-    # 获取文件信息
-    file_info = await get_file_url(bot, file_seg)
+    file_info = await platform.extract_replied_file(bot, event)
     if not file_info:
         state["status"] = "Fail"
-        await analyze.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
+        await analyze.finish("回复的消息中没有找到文件。")
     file_name, file_url = file_info
     file_name = os.path.basename(file_name)
     if not (file_name.lower().endswith(".osr") or file_name.lower().endswith(".mr")):
@@ -133,7 +114,7 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
             output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
             result = await run_analyze_cheating(osr, osu)
             state["status"] = "Finish"
-            await analyze.send(MessageSegment.image(f"file://{output_path}"))
+            await platform.send_image(bot, analyze, Path(output_path).read_bytes())
             await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
         except FinishedException:
             pass    
@@ -158,7 +139,7 @@ async def handle_first(bot: Bot, event: MessageEvent, state: T_State):
         return
 
 @analyze.got("user_file")
-async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_file")):
+async def handle_file(bot: Bot, event: Event, state: T_State, user_msg: Message = Arg("user_file")):
     # 从 state 中取回之前保存的对象
     osr = state["osr"]
     osr_path = state["osr_path"]
@@ -177,13 +158,9 @@ async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_fi
         await analyze.finish()
 
     # 检查用户是否发送了文件
-    file_seg = None
-    for seg in user_msg:
-        if seg.type == "file":
-            file_seg = seg
-            break
+    file_info = await platform.extract_file_from_message(bot, event)
 
-    if not file_seg:
+    if not file_info:
         text = user_msg.extract_plain_text().strip()
         if text == "0":
             await analyze.finish("操作已取消。")
@@ -193,7 +170,7 @@ async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_fi
             try:
                 output_path = await run_plot_comprehensive(str(CACHE_DIR), osr)
                 result = await run_analyze_cheating(osr)
-                await analyze.send(MessageSegment.image(f"file://{output_path}"))
+                await platform.send_image(bot, analyze, Path(output_path).read_bytes())
                 await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
             except FinishedException:
                 pass
@@ -232,7 +209,7 @@ async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_fi
                 await analyze.send("已收到谱面链接，处理中，请稍候...")
                 output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
                 result = await run_analyze_cheating(osr, osu)
-                await analyze.send(MessageSegment.image(f"file://{output_path}"))
+                await platform.send_image(bot, analyze, Path(output_path).read_bytes())
                 await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
             except FinishedException:
                 pass
@@ -249,10 +226,6 @@ async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_fi
             await analyze.reject("输入无效，请发送谱面文件，或输入 1 跳过，输入 0 取消。")
     else:
         # 处理用户发送的 .osu 文件
-        file_info = await get_file_url(bot, file_seg)
-        if not file_info:
-            await analyze.finish("无法获取文件信息。请确保机器人有权限访问该文件，或者文件链接有效。")
-
         file_name, file_url = file_info
         file_name = os.path.basename(file_name)
         if not (file_name.lower().endswith(".osu") or file_name.lower().endswith(".mc")):
@@ -293,7 +266,7 @@ async def handle_file(bot: Bot, state: T_State, user_msg: Message = Arg("user_fi
             await analyze.send(f"已收到文件，请稍候...")
             output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
             result = await run_analyze_cheating(osr, osu)
-            await analyze.send(MessageSegment.image(f"file://{output_path}"))
+            await platform.send_image(bot, analyze, Path(output_path).read_bytes())
             await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
         except FinishedException:
             pass

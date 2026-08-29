@@ -116,8 +116,14 @@
 | default_convert_hp | 否 | int | 8 | .mc转.osu的默认HPDrainRate值 |
 | max_file_size_mb | 否 | int | 50 | 允许处理的最大文件大小（MB），设置为0时无限制 |
 | batch_max_charts | 否 | int | 15 | 图包批量分析单次最多处理谱面数，设置为0时无限制 |
+| qq_max_zip_charts | 否 | int | 10 | QQ 官方适配器下图包批量分析单次最多处理谱面数 |
 
 注: 其他内容的相关配置项过多，这里只列出基础配置部分。如有修改需要请查看[配置文件](https://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/blob/main/src/nonebot_plugin_osumania_toolkit/config.py)中的注释。
+
+## QQ 官方机器人（双适配器）说明
+
+本插件支持 OneBot v11（如 NapCat / go-cqhttp）与 QQ 官方机器人 API（nonebot-adapter-qq）双适配器共存，可在同一进程内同时接入两个通道、各自独立收发。
+QQ 适配器的 AppID/密钥等连接配置请参考 [nonebot-adapter-qq](https://github.com/nonebot/adapter-qq) 文档。
 
 ## 参考内容
 - [Suuny Rework](https://github.com/sunnyxxy/Star-Rating-Rebirth): 使用了Suuny Rework的算法进行难度估计。
