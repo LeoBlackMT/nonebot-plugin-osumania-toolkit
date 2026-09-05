@@ -3,11 +3,19 @@ from __future__ import annotations
 import math
 import struct
 import tempfile
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from ...parser.osu_file_parser import osu_file
 from .exceptions import NotManiaError, ParseError
+
+# interlude 星数 memo（路径 + mtime + 大小 + rate + cvt 为键）：
+# companella 每次都会重算，同文件同参数重复调用直接命中。
+_INTERLUDE_CACHE_MAX = 16
+_interlude_cache: OrderedDict[tuple[Any, ...], float] = OrderedDict()
+_interlude_cache_lock = threading.Lock()
 
 
 class NoteType:
@@ -407,14 +415,52 @@ def calculate_interlude_difficulty(rate: float, note_rows: list[dict[str, Any]])
     return {"noteDifficulty": note_difficulty, "strains": strains, "variety": variety, "hands": hands, "overall": overall}
 
 
+def _interlude_cache_key(
+    source: Any, rate: float, cvt_flag: Any, chart: Any
+) -> tuple[Any, ...] | None:
+    """缓存键；仅对真实存在的 .osu 文件缓存（文本/临时文件源不缓存）。"""
+    if chart is not None:
+        path_value = getattr(chart, "file_path", None)
+        if not path_value:
+            return None
+        path = Path(str(path_value))
+    else:
+        try:
+            path = _resolve_source_path(source)
+        except Exception:  # noqa: BLE001
+            return None
+        if not (path.exists() and path.is_file() and path.suffix.lower() == ".osu"):
+            return None
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    cvt_key: Any = tuple(cvt_flag) if isinstance(cvt_flag, (list, tuple)) else cvt_flag
+    return (str(path), st.st_mtime_ns, st.st_size, float(rate), cvt_key)
+
+
 def calculate_interlude_star(
     source: Any, rate: float = 1.0, cvt_flag: Any = None, *, chart: Any = None
 ) -> float:
     resolved_rate = rate if math.isfinite(rate) and rate > 0 else 1.0
+    cache_key = _interlude_cache_key(source, resolved_rate, cvt_flag, chart)
+    if cache_key is not None:
+        with _interlude_cache_lock:
+            cached = _interlude_cache.get(cache_key)
+            if cached is not None:
+                _interlude_cache.move_to_end(cache_key)
+                return cached
     built = build_interlude_rows(source, cvt_flag, chart=chart)
     difficulty = calculate_interlude_difficulty(resolved_rate, built["rows"])
     overall = float(difficulty.get("overall", 0.0))
-    return overall if math.isfinite(overall) else 0.0
+    overall = overall if math.isfinite(overall) else 0.0
+    if cache_key is not None:
+        with _interlude_cache_lock:
+            _interlude_cache[cache_key] = overall
+            _interlude_cache.move_to_end(cache_key)
+            while len(_interlude_cache) > _INTERLUDE_CACHE_MAX:
+                _interlude_cache.popitem(last=False)
+    return overall
 
 
 def estimate_interlude_star_from_chart(
