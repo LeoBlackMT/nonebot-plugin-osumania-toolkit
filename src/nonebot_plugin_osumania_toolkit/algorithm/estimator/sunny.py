@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from typing import Any
 
 from ..rework.xxy_algorithm import calculate as calculate_sunny
 from ...data.intervals import sr_intervals_data
 from .exceptions import NotManiaError, ParseError
 from .shared import resolve_chart_path
+
+# 同一谱面（路径 + mtime + 大小）在同一组参数下的 sunny 结果 memo：
+# mapview/mixed/daniel 兜底等场景存在同参数重复计算，缓存后直接复用。
+_SUNNY_CACHE_MAX = 32
+_sunny_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+_sunny_cache_lock = threading.Lock()
 
 
 def _interval_lookup(sr: float, table: list[tuple[float, float, str]], fallback_label: str) -> str:
@@ -58,6 +66,36 @@ def build_sunny_result(star: float, ln_ratio: float, column_count: int, *, graph
     }
 
 
+def _sunny_cache_key(path: Any, speed_rate: Any, od_flag: Any, cvt_flag: Any) -> tuple[Any, ...] | None:
+    """缓存键：路径 + mtime + 大小 + 计算参数；stat 失败（文件已消失）则不缓存。"""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    cvt_key: Any = tuple(cvt_flag) if isinstance(cvt_flag, (list, tuple)) else cvt_flag
+    try:
+        rate_key = float(speed_rate)
+    except (TypeError, ValueError):
+        rate_key = speed_rate
+    return (str(path), st.st_mtime_ns, st.st_size, rate_key, od_flag, cvt_key)
+
+
+def _sunny_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    with _sunny_cache_lock:
+        cached = _sunny_cache.get(key)
+        if cached is not None:
+            _sunny_cache.move_to_end(key)
+        return cached
+
+
+def _sunny_cache_put(key: tuple[Any, ...], value: dict[str, Any]) -> None:
+    with _sunny_cache_lock:
+        _sunny_cache[key] = value
+        _sunny_cache.move_to_end(key)
+        while len(_sunny_cache) > _SUNNY_CACHE_MAX:
+            _sunny_cache.popitem(last=False)
+
+
 def estimate_sunny_result(
     source: Any,
     speed_rate: float = 1.0,
@@ -68,6 +106,13 @@ def estimate_sunny_result(
 ) -> dict[str, Any]:
     path_source = chart if chart is not None else source
     path = resolve_chart_path(path_source)
+
+    cache_key = _sunny_cache_key(path, speed_rate, od_flag, cvt_flag)
+    if cache_key is not None:
+        cached = _sunny_cache_get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
     result = calculate_sunny(str(path), speed_rate, od_flag, cvt_flag, chart=chart)
 
     if result == -1:
@@ -76,4 +121,7 @@ def estimate_sunny_result(
         raise NotManiaError("Beatmap mode is not mania")
 
     star, ln_ratio, column_count = result
-    return build_sunny_result(float(star), float(ln_ratio), int(column_count))
+    built = build_sunny_result(float(star), float(ln_ratio), int(column_count))
+    if cache_key is not None:
+        _sunny_cache_put(cache_key, built)
+    return dict(built)

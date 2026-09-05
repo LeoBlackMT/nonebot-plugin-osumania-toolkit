@@ -291,12 +291,15 @@ def _try_run_daniel_fallback(
     speed_rate: float,
     od_flag: Any,
     cvt_flag: Any,
+    sunny_result: dict[str, Any] | None = None,
     chart: Any = None,
 ) -> dict[str, Any] | None:
     try:
         from .daniel import estimate_daniel_result
 
-        return estimate_daniel_result(source, speed_rate, od_flag, cvt_flag, chart=chart)
+        return estimate_daniel_result(
+            source, speed_rate, od_flag, cvt_flag, sunny_result=sunny_result, chart=chart
+        )
     except Exception:  # noqa: BLE001
         return None
 
@@ -388,8 +391,9 @@ def estimate_mixed_result(
                     numeric_difficulty = azusa_result.get("numericDifficulty")
                     numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
         elif not in_enabled:
+            # 传 chart 复用已解析谱面，避免 azusa 内部对同一文件重复解析。
             azusa_result = _try_run_azusa_fallback(
-                source, speed_rate, od_flag, cvt_flag, sunny
+                source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
             )
             if can_use_rc_result(azusa_result):
                 selected_result = azusa_result
@@ -399,7 +403,7 @@ def estimate_mixed_result(
                 numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
             else:
                 daniel_result = _try_run_daniel_fallback(
-                    source, speed_rate, od_flag, cvt_flag, chart
+                    source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
                 )
                 if can_use_daniel_result(daniel_result):
                     selected_result = daniel_result
@@ -424,7 +428,7 @@ def estimate_mixed_result(
                 actual_algorithm = "Companella"
             else:
                 daniel_result = _try_run_daniel_fallback(
-                    source, speed_rate, od_flag, cvt_flag, chart
+                    source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
                 )
                 if can_use_daniel_result(daniel_result):
                     rc_difficulty = str(daniel_result.get("estDiff", rc_difficulty))

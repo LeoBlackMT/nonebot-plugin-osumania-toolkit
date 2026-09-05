@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import bisect
 import lzma
-import struct
 from dataclasses import dataclass
 from typing import Any, Optional
+
+import numpy as np
 
 from ...parser.osr_file_parser import osr_file
 from ...parser.osu_file_parser import NOTE_HOLD_HEAD, NOTE_HOLD_TAIL, NOTE_NORMAL, osu_file
@@ -35,7 +36,9 @@ _IS_MISSED_HEAD = frozenset({H_MISSED_HEAD_DROPPED, H_MISSED_HEAD_REGRABBED})
 
 def f32(value: float) -> float:
     """IEEE-754 binary32 round trip (F# float32 semantics)."""
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+    # np.float32 与 struct.pack("<f") 同为 round-to-nearest-even 舍入，
+    # 结果位型一致；此写法省去 struct 的两次 C 调用与 boxing（热路径 17 万+ 次调用）。
+    return float(np.float32(value))
 
 
 def f32div(a: float, b: float) -> float:
