@@ -38,15 +38,24 @@ def _query_cumsum(q: float, x: np.ndarray, F: np.ndarray, f: np.ndarray) -> floa
     return float(F[i] + f[i] * (q - x[i]))
 
 
+def _query_cumsum_vec(q_arr: np.ndarray, x: np.ndarray, F: np.ndarray, f: np.ndarray) -> np.ndarray:
+    """_query_cumsum 的向量化版本（边界语义一致：q<=x[0]→0，q>=x[-1]→F[-1]）。"""
+    i = np.searchsorted(x, q_arr, side="right") - 1
+    i_clamped = np.clip(i, 0, len(x) - 1)
+    vals = F[i_clamped] + f[i_clamped] * (q_arr - x[i_clamped])
+    vals = np.where(q_arr <= x[0], 0.0, vals)
+    vals = np.where(q_arr >= x[-1], F[-1], vals)
+    return vals
+
+
 def _smooth_on_corners(
     x: np.ndarray, f: np.ndarray, window: float, scale: float = 1.0, mode: str = "sum"
 ) -> np.ndarray:
     F = _cumulative_sum(x, f)
-    g = np.zeros(len(x), dtype=np.float64)
     a = np.clip(x - window, x[0], x[-1])
     b = np.clip(x + window, x[0], x[-1])
     # Vectorized queryCumsum
-    val = np.array([_query_cumsum(b[i], x, F, f) - _query_cumsum(a[i], x, F, f) for i in range(len(x))])
+    val = _query_cumsum_vec(b, x, F, f) - _query_cumsum_vec(a, x, F, f)
     if mode == "avg":
         span = b - a
         return np.where(span > 0, val / span, 0.0)
@@ -185,37 +194,61 @@ def _get_corners(T: int, note_seq: list) -> tuple[np.ndarray, np.ndarray, np.nda
 def _get_key_usage(
     K: int, T: int, note_seq: list, base_corners: np.ndarray
 ) -> dict[int, np.ndarray]:
-    key_usage: dict[int, np.ndarray] = {k: np.zeros(len(base_corners), dtype=np.uint8) for k in range(K)}
-    for k, h in note_seq:
-        start_time = max(h - 150, 0)
-        end_time = min(h + 150, T - 1)
-        left_idx = _bisect_left(base_corners, start_time)
-        right_idx = _bisect_left(base_corners, end_time)
-        key_usage[k][left_idx:right_idx] = 1
-    return key_usage
+    """差分 + 前缀和实现：批量 searchsorted 一次定位全部区间端点。
+    Daniel 语义：所有音符 end 一律 min(h+150, T-1) 钳位（无 LN 区分）。"""
+    bc = np.asarray(base_corners, dtype=float)
+    n = len(bc)
+    empty = {k: np.zeros(n, dtype=np.uint8) for k in range(K)}
+    if not note_seq or K <= 0:
+        return empty
+    m = len(note_seq)
+    ks = np.fromiter((k for (k, h) in note_seq), dtype=np.int64, count=m)
+    hs = np.fromiter((h for (k, h) in note_seq), dtype=float, count=m)
+    starts = np.maximum(hs - 150.0, 0.0)
+    ends = np.minimum(hs + 150.0, float(T) - 1.0)
+    lis = np.searchsorted(bc, starts, side="left")
+    ris = np.searchsorted(bc, ends, side="left")
+    diff = np.zeros((K, n + 1), dtype=np.int32)
+    np.add.at(diff, (ks, np.minimum(lis, n)), 1)
+    np.add.at(diff, (ks, np.minimum(ris, n)), -1)
+    usage2d = np.cumsum(diff, axis=1)[:, :n] > 0
+    return {k: usage2d[k].astype(np.uint8) for k in range(K)}
 
 
 def _get_key_usage_400(
     K: int, note_seq: list, base_corners: np.ndarray
 ) -> dict[int, np.ndarray]:
-    key_usage_400: dict[int, np.ndarray] = {k: np.zeros(len(base_corners), dtype=np.float64) for k in range(K)}
-    for k, h in note_seq:
-        left400_idx = _bisect_left(base_corners, h - 400)
-        center_idx = _bisect_left(base_corners, h)
-        right400_idx = _bisect_left(base_corners, h + 400)
+    """批量 searchsorted 后按音符做纯切片累加，消除逐音符标量 bisect 与纯 Python 内层循环。"""
+    bc = np.asarray(base_corners, dtype=float)
+    n = len(bc)
+    arr = np.zeros((K, n), dtype=np.float64)
+    inv_400_sq = 3.75 / (400 * 400)
+    if not note_seq or K <= 0:
+        return {k: arr[k] for k in range(K)}
+    m = len(note_seq)
+    ks = np.fromiter((k for (k, h) in note_seq), dtype=np.int64, count=m)
+    hs = np.fromiter((h for (k, h) in note_seq), dtype=float, count=m)
+    left400s = np.searchsorted(bc, hs - 400.0, side="left")
+    centers = np.searchsorted(bc, hs, side="left")
+    right400s = np.searchsorted(bc, hs + 400.0, side="left")
 
-        if 0 <= center_idx < len(base_corners):
-            key_usage_400[k][center_idx] += 3.75
+    for i in range(m):
+        k = ks[i]
+        h = hs[i]
+        center = centers[i]
+        row = arr[k]
+        if 0 <= center < n:
+            row[center] += 3.75
+        l400 = left400s[i]
+        if center > l400:
+            seg = bc[l400:center]
+            row[l400:center] += 3.75 - inv_400_sq * (seg - h) ** 2
+        r400 = right400s[i]
+        if r400 > center + 1:
+            seg = bc[center + 1:r400]
+            row[center + 1:r400] += 3.75 - inv_400_sq * (seg - h) ** 2
 
-        for idx in range(left400_idx, center_idx):
-            offset = float(base_corners[idx]) - float(h)
-            key_usage_400[k][idx] += 3.75 - (3.75 / (400 * 400)) * (offset * offset)
-
-        for idx in range(center_idx + 1, right400_idx):
-            offset = float(base_corners[idx]) - float(h)
-            key_usage_400[k][idx] += 3.75 - (3.75 / (400 * 400)) * (offset * offset)
-
-    return key_usage_400
+    return {k: arr[k] for k in range(K)}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -253,6 +286,7 @@ def _jack_nerfer(delta: float) -> float:
 def _compute_jbar(
     K: int, x: float, note_seq_by_column: list, base_corners: np.ndarray
 ) -> tuple[dict[int, np.ndarray], np.ndarray]:
+    bc = np.asarray(base_corners, dtype=float)
     J_ks: dict[int, np.ndarray] = {k: np.zeros(len(base_corners)) for k in range(K)}
     delta_ks: dict[int, np.ndarray] = {k: np.full(len(base_corners), 1e9) for k in range(K)}
 
@@ -260,19 +294,27 @@ def _compute_jbar(
         notes = note_seq_by_column[k]
         if len(notes) < 2:
             continue
-        for i in range(len(notes) - 1):
-            start = notes[i][1]
-            end = notes[i + 1][1]
-            if end <= start:
-                continue
-            left_idx = _bisect_left(base_corners, start)
-            right_idx = _bisect_left(base_corners, end)
+        starts = np.array([notes[i][1] for i in range(len(notes) - 1)], dtype=float)
+        ends = np.array([notes[i + 1][1] for i in range(len(notes) - 1)], dtype=float)
+        valid = ends > starts
+        starts = starts[valid]
+        ends = ends[valid]
+        if len(starts) == 0:
+            continue
+        deltas = 0.001 * (ends - starts)
+        # _jack_nerfer 向量化：1 - 7e-5 * (0.15 + |delta - 0.08|)^-4
+        vals = (deltas ** -1) * ((deltas + 0.11 * (x ** 0.25)) ** -1) * (
+            1.0 - 7e-5 * (0.15 + np.abs(deltas - 0.08)) ** (-4)
+        )
+        lis = np.searchsorted(bc, starts, side="left")
+        ris = np.searchsorted(bc, ends, side="left")
+        J_row = J_ks[k]
+        d_row = delta_ks[k]
+        for left_idx, right_idx, delta, val in zip(lis, ris, deltas, vals):
             if left_idx >= right_idx:
                 continue
-            delta = 0.001 * (end - start)
-            val = (delta ** -1) * ((delta + 0.11 * (x ** 0.25)) ** -1) * _jack_nerfer(delta)
-            J_ks[k][left_idx:right_idx] = val
-            delta_ks[k][left_idx:right_idx] = delta
+            J_row[left_idx:right_idx] = val
+            d_row[left_idx:right_idx] = delta
 
     Jbar_ks = {k: _smooth_on_corners(base_corners, J_ks[k], window=500.0, scale=0.001, mode="sum") for k in range(K)}
 
@@ -302,8 +344,9 @@ _CROSS_MATRIX = [
 
 
 def _compute_xbar(
-    K: int, x: float, note_seq_by_column: list, active_columns: list, base_corners: np.ndarray
+    K: int, x: float, note_seq_by_column: list, key_usage: dict[int, np.ndarray], base_corners: np.ndarray
 ) -> np.ndarray:
+    bc = np.asarray(base_corners, dtype=float)
     cross_coeff = _CROSS_MATRIX[K]
     X_ks: dict[int, np.ndarray] = {k: np.zeros(len(base_corners)) for k in range(K + 1)}
     fast_cross: dict[int, np.ndarray] = {k: np.zeros(len(base_corners)) for k in range(K + 1)}
@@ -315,40 +358,54 @@ def _compute_xbar(
             notes_in_pair = note_seq_by_column[K - 1] if K > 0 else []
         else:
             notes_in_pair = sorted(note_seq_by_column[k - 1] + note_seq_by_column[k], key=lambda t: t[1])
+        if len(notes_in_pair) < 2:
+            continue
 
-        for i in range(1, len(notes_in_pair)):
-            start = notes_in_pair[i - 1][1]
-            end = notes_in_pair[i][1]
-            if end <= start:
-                continue
-            left_idx = _bisect_left(base_corners, start)
-            right_idx = _bisect_left(base_corners, end)
+        starts = np.array([notes_in_pair[i - 1][1] for i in range(1, len(notes_in_pair))], dtype=float)
+        ends = np.array([notes_in_pair[i][1] for i in range(1, len(notes_in_pair))], dtype=float)
+        valid = ends > starts
+        starts = starts[valid]
+        ends = ends[valid]
+        if len(starts) == 0:
+            continue
+        deltas = 0.001 * (ends - starts)
+        vals = 0.16 * (np.maximum(x, deltas) ** -2)
+        fast_vals = np.maximum(0.0, 0.4 * (np.maximum(np.maximum(deltas, 0.06), 0.75 * x) ** -2) - 80.0)
+        lis = np.searchsorted(bc, starts, side="left")
+        ris = np.searchsorted(bc, ends, side="left")
+
+        X_row = X_ks[k]
+        fc_row = fast_cross[k]
+        ku_left = key_usage[k - 1] if k >= 1 else None
+        ku_right = key_usage[k] if 1 <= k < K else None
+        for left_idx, right_idx, val, fast_val in zip(lis, ris, vals, fast_vals):
             if right_idx <= left_idx:
                 continue
+            # 基线语义：k==0 时 (k-1)=-1 永不在 active_columns → left 恒无效；
+            # k==K 时 k 永不在 active_columns → right 恒无效。两者均恒缩放。
+            if k == 0 or k == K:
+                inactive = True
+            else:
+                left_inactive = ku_left[left_idx] == 0 and ku_left[right_idx] == 0
+                right_inactive = ku_right[left_idx] == 0 and ku_right[right_idx] == 0
+                inactive = left_inactive or right_inactive
+            if inactive:
+                val = val * (1.0 - cross_coeff[k])
+            X_row[left_idx:right_idx] = val
+            fc_row[left_idx:right_idx] = fast_val
 
-            delta = 0.001 * (end - start)
-            val = 0.16 * (max(x, delta) ** -2)
+    # X_base 广播求和：替代 O(角点×K) 的逐角点 Python 循环。
+    # 基线 sum2 对 pair<=0 跳过；fast_cross>=0 且 cross_coeff>=0（K>=1），乘积非负，sqrt 安全，
+    # pair==0 时 sqrt(0)=0 与跳过等价。
+    X_ks_arr = np.stack([X_ks[k] for k in range(K + 1)], axis=0)
+    coeff_arr = np.asarray(cross_coeff, dtype=float)[:, np.newaxis]
+    X_base = np.sum(X_ks_arr * coeff_arr, axis=0)
 
-            left_inactive = (k - 1) not in active_columns[left_idx] and (k - 1) not in active_columns[right_idx]
-            right_inactive = k not in active_columns[left_idx] and k not in active_columns[right_idx]
-
-            if left_inactive or right_inactive:
-                val *= 1.0 - cross_coeff[k]
-
-            fast_val = max(0.0, 0.4 * (max(delta, 0.06, 0.75 * x) ** -2) - 80.0)
-
-            X_ks[k][left_idx:right_idx] = val
-            fast_cross[k][left_idx:right_idx] = fast_val
-
-    X_base = np.zeros(len(base_corners))
-    for i in range(len(base_corners)):
-        sum1 = sum(X_ks[k][i] * cross_coeff[k] for k in range(K + 1))
-        sum2 = 0.0
-        for k in range(K):
-            pair = fast_cross[k][i] * cross_coeff[k] * fast_cross[k + 1][i] * cross_coeff[k + 1]
-            if pair > 0:
-                sum2 += math.sqrt(pair)
-        X_base[i] = sum1 + sum2
+    fc_arr = np.stack([fast_cross[k] for k in range(K + 1)], axis=0)
+    cc = np.asarray(cross_coeff, dtype=float)
+    X_base += np.sum(
+        np.sqrt(fc_arr[:-1] * cc[:-1, np.newaxis] * fc_arr[1:] * cc[1:, np.newaxis]), axis=0
+    )
 
     return _smooth_on_corners(base_corners, X_base, window=500.0, scale=0.001, mode="sum")
 
@@ -361,72 +418,139 @@ def _stream_booster_daniel(delta: float) -> float:
     return 1.0 + primary + secondary
 
 
+def _stream_booster_daniel_vec(deltas: np.ndarray) -> np.ndarray:
+    """_stream_booster_daniel 的向量化版本。"""
+    bpm = np.clip(7.5 / np.maximum(deltas, 1e-9), 0.0, 420.0)
+    primary = 0.10 / (1.0 + np.exp(-0.06 * (bpm - 175.0)))
+    secondary = np.where(
+        (bpm >= 200.0) & (bpm <= 350.0),
+        0.30 * (1.0 - np.exp(-0.02 * (bpm - 200.0))),
+        0.0,
+    )
+    return 1.0 + primary + secondary
+
+
 def _compute_pbar(
     x: float, note_seq: list, anchor: np.ndarray, base_corners: np.ndarray
 ) -> np.ndarray:
+    bc = np.asarray(base_corners, dtype=float)
     P_step = np.zeros(len(base_corners))
 
-    for i in range(len(note_seq) - 1):
-        h_l = note_seq[i][1]
-        h_r = note_seq[i + 1][1]
-        delta_time = h_r - h_l
-
-        if delta_time < 1e-9:
-            spike = 1000.0 * (0.02 * (4.0 / x - 24.0)) ** 0.25
-            left_idx = _bisect_left(base_corners, h_l)
-            right_idx = _bisect_right(base_corners, h_l)
-            P_step[left_idx:right_idx] += spike
-            continue
-
-        left_idx = _bisect_left(base_corners, h_l)
-        right_idx = _bisect_left(base_corners, h_r)
-        if right_idx <= left_idx:
-            continue
-
-        delta = 0.001 * delta_time
-        b_val = _stream_booster_daniel(delta)
+    if len(note_seq) > 1:
+        hs = np.array([note[1] for note in note_seq], dtype=float)
+        h_ls = hs[:-1]
+        h_rs = hs[1:]
+        delta_times = h_rs - h_ls
+        lis = np.searchsorted(bc, h_ls, side="left")
+        ris = np.searchsorted(bc, h_rs, side="left")
+        ris_right = np.searchsorted(bc, h_ls, side="right")
         base_inc = (0.08 * (x ** -1) * (1.0 - 24.0 * (x ** -1) * ((x / 6.0) ** 2))) ** 0.25
 
-        if delta < (2.0 * x) / 3.0:
-            inc = (delta ** -1) * (0.08 * (x ** -1) * (1.0 - 24.0 * (x ** -1) * ((delta - x / 2.0) ** 2))) ** 0.25 * max(b_val, 1.0)
-        else:
-            inc = (delta ** -1) * base_inc * max(b_val, 1.0)
+        spike_mask = delta_times < 1e-9
+        body_mask = ~spike_mask
+        delta_b = 0.001 * delta_times[body_mask]
+        b_val = _stream_booster_daniel_vec(delta_b)
+        # 两分支整体求值后由 where 选取；未选中分支的内层式可能为负，
+        # 幂运算产生 NaN 属预期，用 errstate 抑制告警。
+        with np.errstate(invalid="ignore"):
+            inc = np.where(
+                delta_b < (2.0 * x) / 3.0,
+                (delta_b ** -1)
+                * (0.08 * (x ** -1) * (1.0 - 24.0 * (x ** -1) * ((delta_b - x / 2.0) ** 2))) ** 0.25,
+                (delta_b ** -1) * base_inc,
+            )
+        inc = inc * np.maximum(b_val, 1.0)
 
-        seg_anchor = anchor[left_idx:right_idx]
-        P_step[left_idx:right_idx] += np.minimum(inc * seg_anchor, np.maximum(inc, inc * 2.0 - 10.0))
+        li_b = lis[body_mask]
+        ri_b = ris[body_mask]
+        inc_b = inc
+        spike_l = lis[spike_mask]
+        spike_r = ris_right[spike_mask]
+        spike_val = 1000.0 * (0.02 * (4.0 / x - 24.0)) ** 0.25
+
+        # 按基线的音符顺序逐段累加（保持浮点累加次序一致）。
+        bi = 0
+        si = 0
+        for i in range(len(note_seq) - 1):
+            if spike_mask[i]:
+                left_idx = spike_l[si]
+                right_idx = spike_r[si]
+                si += 1
+                if right_idx > left_idx:
+                    P_step[left_idx:right_idx] += spike_val
+                continue
+            left_idx = li_b[bi]
+            right_idx = ri_b[bi]
+            inc_i = inc_b[bi]
+            bi += 1
+            if right_idx <= left_idx:
+                continue
+            seg_anchor = anchor[left_idx:right_idx]
+            P_step[left_idx:right_idx] += np.minimum(
+                inc_i * seg_anchor, np.maximum(inc_i, inc_i * 2.0 - 10.0)
+            )
 
     return _smooth_on_corners(base_corners, P_step, window=500.0, scale=0.001, mode="sum")
 
 
 def _compute_abar(
-    K: int, active_columns: list, delta_ks: dict[int, np.ndarray],
+    K: int, key_usage: dict[int, np.ndarray], delta_ks: dict[int, np.ndarray],
     a_corners: np.ndarray, base_corners: np.ndarray
 ) -> np.ndarray:
-    dks: dict[int, np.ndarray] = {k: np.zeros(len(base_corners)) for k in range(K - 1)}
+    bc = np.asarray(base_corners, dtype=float)
+    n = len(bc)
+    dks = np.zeros((max(K - 1, 0), n))
+    ku = (
+        np.stack([key_usage[k] for k in range(K)], axis=0)
+        if K > 0
+        else np.zeros((0, n), dtype=bool)
+    ).astype(bool)
 
-    for i in range(len(base_corners)):
-        cols = active_columns[i]
-        for j in range(len(cols) - 1):
-            k0 = cols[j]
-            k1 = cols[j + 1]
-            dks[k0][i] = abs(delta_ks[k0][i] - delta_ks[k1][i]) + 0.4 * max(0.0, max(delta_ks[k0][i], delta_ks[k1][i]) - 0.11)
+    dk_rows = [delta_ks[k] for k in range(K)]
+    # 前缀计数差分定位"相邻活跃列对"：严格介于 a、b 之间的活跃列数 = cnt[b-1] - cnt[a]。
+    # ku 形状为 (列, 角点)，沿列轴（axis=0）累计每角点的活跃列数。
+    cnt = np.cumsum(ku, axis=0, dtype=np.int32)
+
+    for a in range(K - 1):
+        for b in range(a + 1, K):
+            mask = ku[a] & ku[b] & ((cnt[b - 1] - cnt[a]) == 0)
+            if not np.any(mask):
+                continue
+            dka = dk_rows[a][mask]
+            dkb = dk_rows[b][mask]
+            dks[a][mask] = np.abs(dka - dkb) + 0.4 * np.maximum(
+                0.0, np.maximum(dka, dkb) - 0.11
+            )
+
+    a_corners = np.asarray(a_corners, dtype=float)
+    idx_arr = np.clip(np.searchsorted(bc, a_corners, side="left"), 0, n - 1)
+    ku_A = ku[:, idx_arr]
+    dkA = (
+        np.stack([dk_rows[k][idx_arr] for k in range(K)], axis=0)
+        if K > 0
+        else np.zeros((0, len(a_corners)))
+    )
+    dksA = (
+        np.stack([dks[k][idx_arr] for k in range(max(K - 1, 0))], axis=0)
+        if K > 1
+        else np.zeros((max(K - 1, 0), len(a_corners)))
+    )
+    cnt_A = cnt[:, idx_arr]
 
     A_step = np.ones(len(a_corners))
-
-    for i in range(len(a_corners)):
-        idx = _bisect_left(base_corners, float(a_corners[i]))
-        idx = max(0, min(idx, len(base_corners) - 1))
-        cols = active_columns[idx]
-        for j in range(len(cols) - 1):
-            k0 = cols[j]
-            k1 = cols[j + 1]
-            d_val = dks[k0][idx]
-            dk0 = delta_ks[k0][idx]
-            dk1 = delta_ks[k1][idx]
-            if d_val < 0.02:
-                A_step[i] *= min(0.75 + 0.5 * max(dk0, dk1), 1.0)
-            elif d_val < 0.07:
-                A_step[i] *= min(0.65 + 5.0 * d_val + 0.5 * max(dk0, dk1), 1.0)
+    for a in range(K - 1):
+        for b in range(a + 1, K):
+            mask = ku_A[a] & ku_A[b] & ((cnt_A[b - 1] - cnt_A[a]) == 0)
+            if not np.any(mask):
+                continue
+            d_val = dksA[a][mask]
+            mx = np.maximum(dkA[a][mask], dkA[b][mask])
+            factor = np.where(
+                d_val < 0.02,
+                np.minimum(0.75 + 0.5 * mx, 1.0),
+                np.where(d_val < 0.07, np.minimum(0.65 + 5.0 * d_val + 0.5 * mx, 1.0), 1.0),
+            )
+            A_step[mask] *= factor
 
     return _smooth_on_corners(a_corners, A_step, window=250.0, scale=1.0, mode="avg")
 
@@ -556,7 +680,6 @@ def calculate_daniel(
     all_corners, base_corners, a_corners = _get_corners(T, note_seq)
 
     key_usage = _get_key_usage(K, T, note_seq, base_corners)
-    active_columns = [[k for k in range(K) if key_usage[k][i]] for i in range(len(base_corners))]
 
     key_usage_400 = _get_key_usage_400(K, note_seq, base_corners)
     anchor = _compute_anchor(K, key_usage_400, base_corners)
@@ -564,27 +687,25 @@ def calculate_daniel(
     delta_ks, Jbar_base = _compute_jbar(K, x, note_seq_by_column, base_corners)
     Jbar = _interp_values(all_corners, base_corners, Jbar_base)
 
-    Xbar_base = _compute_xbar(K, x, note_seq_by_column, active_columns, base_corners)
+    Xbar_base = _compute_xbar(K, x, note_seq_by_column, key_usage, base_corners)
     Xbar = _interp_values(all_corners, base_corners, Xbar_base)
 
     Pbar_base = _compute_pbar(x, note_seq, anchor, base_corners)
     Pbar = _interp_values(all_corners, base_corners, Pbar_base)
 
-    Abar_base = _compute_abar(K, active_columns, delta_ks, a_corners, base_corners)
+    Abar_base = _compute_abar(K, key_usage, delta_ks, a_corners, base_corners)
     Abar = _interp_values(all_corners, a_corners, Abar_base)
 
     C_step, Ks_step = _compute_c_and_ks(K, note_seq, key_usage, base_corners)
     C_arr = _step_interp(all_corners, base_corners, C_step)
     Ks_arr = _step_interp(all_corners, base_corners, Ks_step)
 
-    # D_all computation
-    D_all = np.zeros(len(all_corners))
-    for i in range(len(all_corners)):
-        left_part = 0.4 * ((Abar[i] ** (3.0 / Ks_arr[i]) * min(Jbar[i], 8.0 + 0.85 * Jbar[i])) ** 1.5)
-        right_part = 0.6 * ((Abar[i] ** (2.0 / 3.0) * (0.8 * Pbar[i])) ** 1.5)
-        S_all = (left_part + right_part) ** (2.0 / 3.0)
-        T_all = (Abar[i] ** (3.0 / Ks_arr[i]) * Xbar[i]) / (Xbar[i] + S_all + 1.0)
-        D_all[i] = 2.7 * (S_all ** 0.5) * (T_all ** 1.5) + S_all * 0.27
+    # D_all computation（向量化，替代逐角点 Python 循环）
+    left_part = 0.4 * ((Abar ** (3.0 / Ks_arr) * np.minimum(Jbar, 8.0 + 0.85 * Jbar)) ** 1.5)
+    right_part = 0.6 * ((Abar ** (2.0 / 3.0) * (0.8 * Pbar)) ** 1.5)
+    S_all = (left_part + right_part) ** (2.0 / 3.0)
+    T_all = (Abar ** (3.0 / Ks_arr) * Xbar) / (Xbar + S_all + 1.0)
+    D_all = 2.7 * (S_all ** 0.5) * (T_all ** 1.5) + S_all * 0.27
 
     # Gaps and weighted percentiles
     gaps = np.empty(len(all_corners))
