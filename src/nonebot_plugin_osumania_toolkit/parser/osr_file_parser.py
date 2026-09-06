@@ -565,6 +565,113 @@ class osr_file:
             logger.error(f"LZMA解压失败: {exc}")
             return
 
+        try:
+            (
+                intervals_real,
+                press_events_real_float,
+                press_times_real_float,
+                pressset_real,
+                play_data,
+                replay_data_real,
+            ) = self._parse_frames_vectorized(replay_text)
+        except Exception:
+            # 逐帧解析兜底：异常帧格式逐个跳过的历史语义仅在 legacy 路径保留。
+            (
+                intervals_real,
+                press_events_real_float,
+                press_times_real_float,
+                pressset_real,
+                play_data,
+                replay_data_real,
+            ) = self._parse_frames_legacy(replay_text)
+
+        self.play_data = play_data
+        self.intervals_raw = intervals_real
+        self.press_events_raw = press_events_real_float
+        self.press_times_raw = press_times_real_float
+        self.pressset_raw = pressset_real
+        self.replay_data_real = replay_data_real
+
+        self.speed_factor = self._build_speed_factor()
+        self._apply_time_conversion(scale=self._resolve_scale_mode())
+        self.sample_rate = self._estimate_sample_rate(self.intervals_raw)
+
+        all_durations: list[int] = []
+        for col_data in self.pressset:
+            all_durations.extend(col_data)
+        self.fft_analysis_result = self._perform_fft_analysis(all_durations) if all_durations else None
+
+        valid_pressset = [column for column in self.pressset if len(column) > 5]
+        if len(valid_pressset) < 2:
+            self.status = "tooFewKeys"
+        else:
+            self.status = "OK"
+
+        logger.debug(f"按下事件总数(len(self.press_events)): {len(self.press_events)}")
+        logger.debug(f"按下事件总数(len(self.press_times))：{len(self.press_times)}")
+        logger.debug(f"按下事件时间样本（前10个）：{str(self.press_times[:10])}")
+        logger.debug(f"按下事件时间样本（后10个）：{str(self.press_times[-10:])}")
+
+    def _parse_frames_vectorized(self, replay_text: str):
+        """向量化帧解析：文本一次转数组 + 位展开 + 按下/释放转移检测。
+
+        语义与 legacy 逐帧状态机一致：
+        - delta == -12345（osu! 结束哨兵）整帧跳过，时间不推进；
+        - 负 delta（预滚动帧）保留并照常推进时间线；
+        - 按下/释放事件按（帧序, 列序）排列；持续时长 = 释放帧时刻 - 最近按下帧时刻
+          （各列按下/释放严格交替，等价于 legacy 的 timeset 累计并含 >= 0 过滤）。
+        """
+        flat_text = replay_text.replace("|", ",").rstrip(",")
+        flat = np.array(flat_text.split(","), dtype=np.float64)
+        if flat.size % 4 != 0:
+            raise ValueError("帧字段数不是 4 的倍数")
+        deltas_all = flat[0::4]
+        masks_all = flat[1::4].astype(np.int64)
+
+        keep = deltas_all != -12345.0
+        deltas = deltas_all[keep]
+        masks = masks_all[keep]
+
+        current = np.cumsum(deltas)
+        bits = ((masks[:, np.newaxis] >> np.arange(18)) & 1).astype(np.int8)
+        prev = np.vstack([np.zeros((1, 18), dtype=np.int8), bits[:-1]])
+
+        press_frames, press_cols = np.nonzero((prev == 0) & (bits == 1))
+        release_frames, release_cols = np.nonzero((prev != 0) & (bits == 0))
+
+        press_times_real_float = current[press_frames].tolist()
+        press_events_real_float = list(
+            zip(press_cols.tolist(), current[press_frames].tolist())
+        )
+
+        pressset_real: list[list[float]] = [[] for _ in range(18)]
+        for col in range(18):
+            rf = release_frames[release_cols == col]
+            if len(rf) == 0:
+                continue
+            pf = press_frames[press_cols == col][: len(rf)]
+            durations = current[rf] - current[pf]
+            durations = durations[durations >= 0.0]
+            if len(durations):
+                pressset_real[col] = durations.tolist()
+
+        intervals_real = deltas.tolist()
+        replay_data_real = list(zip(current.tolist(), masks.tolist()))
+        play_data = [
+            ReplayEvent(int(round(d)), int(m))
+            for d, m in zip(deltas.tolist(), masks.tolist())
+        ]
+        return (
+            intervals_real,
+            press_events_real_float,
+            press_times_real_float,
+            pressset_real,
+            play_data,
+            replay_data_real,
+        )
+
+    def _parse_frames_legacy(self, replay_text: str):
+        """历史逐帧状态机实现，作为向量化路径的兜底。"""
         current_time_real = 0.0
         onset = np.zeros(18, dtype=np.int8)
         timeset_real = np.zeros(18, dtype=np.float64)
@@ -603,32 +710,14 @@ class osr_file:
             play_data.append(ReplayEvent(int(round(delta_ms)), keys_mask))
             replay_data_real.append((current_time_real, keys_mask))
 
-        self.play_data = play_data
-        self.intervals_raw = intervals_real
-        self.press_events_raw = press_events_real_float
-        self.press_times_raw = press_times_real_float
-        self.pressset_raw = pressset_real
-        self.replay_data_real = replay_data_real
-
-        self.speed_factor = self._build_speed_factor()
-        self._apply_time_conversion(scale=self._resolve_scale_mode())
-        self.sample_rate = self._estimate_sample_rate(self.intervals_raw)
-
-        all_durations: list[int] = []
-        for col_data in self.pressset:
-            all_durations.extend(col_data)
-        self.fft_analysis_result = self._perform_fft_analysis(all_durations) if all_durations else None
-
-        valid_pressset = [column for column in self.pressset if len(column) > 5]
-        if len(valid_pressset) < 2:
-            self.status = "tooFewKeys"
-        else:
-            self.status = "OK"
-
-        logger.debug(f"按下事件总数(len(self.press_events)): {len(self.press_events)}")
-        logger.debug(f"按下事件总数(len(self.press_times))：{len(self.press_times)}")
-        logger.debug(f"按下事件时间样本（前10个）：{str(self.press_times[:10])}")
-        logger.debug(f"按下事件时间样本（后10个）：{str(self.press_times[-10:])}")
+        return (
+            intervals_real,
+            press_events_real_float,
+            press_times_real_float,
+            pressset_real,
+            play_data,
+            replay_data_real,
+        )
 
     def convert_times(self, scale: bool = True) -> None:
         """

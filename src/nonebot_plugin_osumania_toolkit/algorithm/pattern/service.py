@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
 from .osu_parser import parse_osu_mania
 from .output_writer import render_output_lines
 from .summary import PatternReport, from_chart
+
+# 键型分析结果 memo（路径 + mtime + 大小为键；rate 在分析中被忽略，不入键）。
+# 同文件重复命令直接命中，避免重复解析与聚类计算。
+_PATTERN_CACHE_MAX = 16
+_pattern_cache: OrderedDict[tuple[str, int, int], PatternAnalysisResult] = OrderedDict()
+_pattern_cache_lock = threading.Lock()
 
 
 class PatternParseError(Exception):
@@ -64,16 +72,39 @@ def _analyze_pattern_file_sync(file_path: str) -> PatternAnalysisResult:
         raise PatternParseError(str(exc)) from exc
 
 
+def _pattern_cache_key(file_path: str) -> tuple[str, int, int] | None:
+    try:
+        st = Path(file_path).stat()
+    except OSError:
+        return None
+    return (str(file_path), st.st_mtime_ns, st.st_size)
+
+
 async def analyze_pattern_file(file_path: str, rate: float = 1.0) -> PatternAnalysisResult:
     _ = rate
+    cache_key = _pattern_cache_key(file_path)
+    if cache_key is not None:
+        with _pattern_cache_lock:
+            cached = _pattern_cache.get(cache_key)
+            if cached is not None:
+                _pattern_cache.move_to_end(cache_key)
+                return cached
     loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(None, _analyze_pattern_file_sync, file_path)
+        result = await loop.run_in_executor(None, _analyze_pattern_file_sync, file_path)
     except Exception as exc:
         # 兼容偶发运行时失败：“Future object is not initialized”。
         if "Future object is not initialized" in str(exc):
-            return _analyze_pattern_file_sync(file_path)
-        raise
+            result = _analyze_pattern_file_sync(file_path)
+        else:
+            raise
+    if cache_key is not None:
+        with _pattern_cache_lock:
+            _pattern_cache[cache_key] = result
+            _pattern_cache.move_to_end(cache_key)
+            while len(_pattern_cache) > _PATTERN_CACHE_MAX:
+                _pattern_cache.popitem(last=False)
+    return result
 
 
 def _format_meta_line(meta_data) -> str:

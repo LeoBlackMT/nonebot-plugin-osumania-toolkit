@@ -7,10 +7,9 @@ import shutil
 import time
 from pathlib import Path
 
-from ...parser.osu_file_parser import osu_file
-
 from ..conversion import convert_mc_to_osu
 from ..estimator.exceptions import NotManiaError, ParseError
+from ..estimator.shared import load_osu_chart
 from ..estimator.sunny import est_diff, estimate_sunny_result
 from ..utils import extract_zip_file, is_mc_file, parse_osu_filename
 
@@ -83,13 +82,13 @@ async def process_chart_file(chart_file: Path, speed_rate: float, od_flag, cvt_f
             )
             chart_file = Path(osu_file_path)
 
-        sr, LN_ratio, column_count = await get_rework_result(str(chart_file), speed_rate, od_flag, cvt_flag)
+        # 解析一次，sunny 计算与元信息读取共用同一份结果（clone 供计算内部改写）。
+        chart = await asyncio.to_thread(load_osu_chart, str(chart_file))
+        sr, LN_ratio, column_count = await get_rework_result(str(chart_file), speed_rate, od_flag, cvt_flag, chart=chart.clone())
 
         meta_data = parse_osu_filename(chart_file.name)
         if not meta_data:
-            osu_obj = osu_file(str(chart_file))
-            await asyncio.to_thread(osu_obj.process)
-            meta_data = osu_obj.meta_data
+            meta_data = getattr(chart, "meta_data", None)
 
         return get_rework_result_text(meta_data, mod_display, sr, speed_rate, od_flag, LN_ratio, column_count)
 
