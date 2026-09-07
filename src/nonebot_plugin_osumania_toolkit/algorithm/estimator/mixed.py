@@ -527,12 +527,28 @@ def estimate_mixed_result(
         rc_numeric_difficulty_hint = sunny.get("numericDifficultyHint")
 
         if column_count == 4:
-            if _number(sunny.get("star")) < 9:
-                companella_plan = {
-                    "lnRatio": ln_ratio,
-                    "lnDifficulty": ln_difficulty,
-                }
-                actual_algorithm = "Companella"
+            if _number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
+                # JS L334-356：低难 4K 的 RC 段以 Azusa 为基准与 Companella
+                # 融合（0.5/0.5）；Azusa 无效时保留纯 Companella 行为。
+                azusa_result = _try_run_azusa_fallback(
+                    source, speed_rate, od_flag, cvt_flag, sunny, chart
+                )
+                if can_use_rc_result(azusa_result):
+                    rc_difficulty = str(azusa_result.get("estDiff", rc_difficulty))
+                    rc_numeric_difficulty = azusa_result.get("numericDifficulty")
+                    rc_numeric_difficulty_hint = azusa_result.get(
+                        "numericDifficultyHint"
+                    )
+                    actual_algorithm = "Azusa"
+                    companella_plan = build_low_band_companella_plan(
+                        azusa_result, ln_ratio, ln_difficulty, "companella"
+                    )
+                else:
+                    companella_plan = {
+                        "lnRatio": ln_ratio,
+                        "lnDifficulty": ln_difficulty,
+                    }
+                    actual_algorithm = "Companella"
             else:
                 daniel_result = _try_run_daniel_fallback(
                     source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
