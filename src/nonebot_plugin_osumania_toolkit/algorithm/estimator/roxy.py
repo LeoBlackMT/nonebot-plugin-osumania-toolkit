@@ -1711,11 +1711,13 @@ def _compute_azusa_high_gap_lift(
 def _compute_azusa_fusion(
     reference_predictions: dict[str, Any], final_numeric: float
 ) -> float:
-    azusa = (
-        _to_float(reference_predictions.get("Azusa"))
-        if reference_predictions
-        else math.nan
-    )
+    # JS `Number(referencePredictions?.Azusa)` 语义：null→0（参与融合）、
+    # 缺引用/undefined→NaN（跳过融合）。
+    if reference_predictions is None:
+        azusa = math.nan
+    else:
+        azusa_raw = reference_predictions.get("Azusa")
+        azusa = 0.0 if azusa_raw is None else _to_float(azusa_raw)
     base = _to_float(final_numeric)
     if not math.isfinite(azusa) or not math.isfinite(base):
         return float(final_numeric)
