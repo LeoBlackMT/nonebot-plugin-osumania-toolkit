@@ -15,11 +15,24 @@ import re
 import math
 from typing import Any
 
-from .shared import resolve_chart_path, normalize_cvt_flags
+from .rc import numeric_to_rc_label
+from .shared import js_fixed, normalize_cvt_flags, resolve_chart_path
 
 MIXED_SUPPORTED_KEYS = {4, 6, 7}
 
 # JS L8-17: Roxy→Azusa 换路的两组阈值（screen 预筛用宽阈值，最终判定用严阈值）。
+# JS L9-19: 低难段（Roxy scope-out 或 Sunny star<9）RC 部分的 Azusa⊕Companella 融合。
+# 两个近似独立的低难估计器取平均以降低方差（与 Roxy 内部 Azusa 融合同一机制族）；
+# 离线探针显示 w∈[0.4,0.7] 结果平坦，取对称 0.5，避免拟合基准分布。
+RC_AZUSA_COMPANELLA_FUSION_WEIGHT = 0.5
+# Companella 仅覆盖低难段：Sunny 星数达到该值以上不再参与 RC 融合。
+LOW_BAND_COMPANELLA_STAR_MAX = 9
+# 融合作用域：仅当 Azusa 的 RC 数值自身低于 Alpha 边界（低难主张成立）时融合。
+# 一致性门控（|Azusa−Companella| ≤ 1.0）经真实运行验证会误杀大量有益融合
+# （净收益 -4.89 → -2.87 MAE 点），已移除：分歧大小无法区分方向对错，
+# 净效应由权重平坦性保证。
+RC_FUSION_LOW_BAND_MAX = 11
+
 AZUSA_RC_PREFERENCE = {
     "balancedHandScreenMaxBias": 0.006,
     "balancedHandMaxBias": 0.003,
@@ -207,12 +220,84 @@ def should_prefer_azusa_rc_result(roxy_result: Any, azusa_result: Any) -> bool:
     return balanced_hand_azusa_lift or anchor_heavy_roxy_damp or crossing_lift
 
 
+def build_low_band_companella_plan(
+    rc_result: dict[str, Any],
+    ln_ratio: Any,
+    ln_difficulty: Any,
+    on_disagree: str,
+) -> dict[str, Any]:
+    """JS ``buildLowBandCompanellaPlan`` 直译。
+
+    低难段融合计划：plan 携带 Azusa 的 RC 基准值（fuseRc），
+    ``apply_companella_to_mixed_result`` 在 Companella 结果到达后做 0.5/0.5 融合。
+    ``on_disagree`` 指定门控未通过时保留哪一侧（该分支改动前的原赢家），
+    保证融合只在两参考一致且都主张低难时生效，其余行为与改动前一致。
+    """
+    return {
+        "lnRatio": ln_ratio,
+        "lnDifficulty": ln_difficulty,
+        "fuseRc": True,
+        "onDisagree": on_disagree,
+        "rcEstDiff": rc_result.get("estDiff"),
+        "rcNumeric": result_numeric_value(rc_result),
+        "rcNumericHint": rc_result.get("numericDifficultyHint", None),
+    }
+
+
 def apply_companella_to_mixed_result(
     mixed_result: dict[str, Any], companella_result: dict[str, Any]
 ) -> dict[str, Any]:
+    """JS ``applyCompanellaToMixedResult`` 直译（含低难 fuseRc 融合路径）。"""
     plan = mixed_result.get("mixedCompanellaPlan")
     if not plan:
         return mixed_result
+
+    # 低难融合路径：Companella 与计划携带的 Azusa RC 基准做固定权重平均，
+    # estDiff 由融合数值重新派生（numeric 与 estDiff 保持同源）。
+    # 门控：仅当 Azusa 数值低于 Alpha（低难主张成立）时融合；未通过时回落
+    # onDisagree 指定的原赢家（RC 分支为 Azusa，Mix 分支为 Companella），
+    # 行为与改动前一致。
+    if plan.get("fuseRc"):
+        rc_numeric = _number(plan.get("rcNumeric"))
+        companella_numeric = _number(
+            companella_result.get("numericDifficulty") if companella_result else None
+        )
+        if not math.isfinite(rc_numeric) or not math.isfinite(companella_numeric):
+            return mixed_result
+
+        if rc_numeric >= RC_FUSION_LOW_BAND_MAX:
+            if plan.get("onDisagree") == "companella":
+                return {
+                    **mixed_result,
+                    "estDiff": compose_difficulty_from_rc_ln(
+                        companella_result.get("estDiff"),
+                        plan.get("lnDifficulty"),
+                        plan.get("lnRatio"),
+                    ),
+                    "numericDifficulty": companella_result.get("numericDifficulty"),
+                    "numericDifficultyHint": companella_result.get(
+                        "numericDifficultyHint"
+                    ),
+                    "mixedCompanellaPlan": None,
+                }
+            return mixed_result
+
+        weight = RC_AZUSA_COMPANELLA_FUSION_WEIGHT
+        # JS toFixed(2) 半进位语义（Decimal HALF_UP）。
+        fused = js_fixed(
+            rc_numeric * weight + companella_numeric * (1 - weight), 2
+        )
+        return {
+            **mixed_result,
+            "estDiff": compose_difficulty_from_rc_ln(
+                numeric_to_rc_label(fused),
+                plan.get("lnDifficulty"),
+                plan.get("lnRatio"),
+            ),
+            "numericDifficulty": fused,
+            "numericDifficultyHint": None,
+            "mixedCompanellaPlan": None,
+        }
 
     return {
         **mixed_result,
@@ -401,6 +486,17 @@ def estimate_mixed_result(
                 est_diff = str(azusa_result.get("estDiff", est_diff))
                 numeric_difficulty = azusa_result.get("numericDifficulty")
                 numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
+                # 低难段（Roxy scope-out 且 Sunny star<9）：RC 数值升级为
+                # Azusa⊕Companella 融合；门控未通过或 Companella 失败时，
+                # 本结果（纯 Azusa）兜底——与改动前行为一致。
+                if _number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
+                    sunny_parts = split_difficulty_parts(sunny.get("estDiff"))
+                    companella_plan = build_low_band_companella_plan(
+                        azusa_result,
+                        ln_ratio,
+                        sunny_parts["ln"],
+                        "azusa",
+                    )
             else:
                 daniel_result = _try_run_daniel_fallback(
                     source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
