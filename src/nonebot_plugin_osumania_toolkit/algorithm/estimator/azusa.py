@@ -432,6 +432,73 @@ def _compute_reference_correction(ae: float, dn: float | None, sn: float | None)
     return _clamp(corr * gt, -1.2, 1.2)
 
 
+# ---------------------------------------------------------------------------
+# 马拉松时长修正 (js/estimator/marathonCorrection.js 直译)
+# ---------------------------------------------------------------------------
+# 仅 4K>thresholdS 时由上游 (mapview Mixed 流程) 计算并注入 {durationS, ettValues}；
+# 只降不升：corr>0 时 finalNumeric -= corr，estDiff/star 由修正后数值统一重派生。
+# 参数见 JS L32-37；无 MSD/技能不均衡/时长不足/taper 归零 → 返回 0（不动）。
+
+MARATHON_DURATION_THRESHOLD_S = 300
+MARATHON_CORRECTION_SCALE = 0.40
+MARATHON_CORRECTION_CAP = 0.50
+MARATHON_BALANCE_RATIO = 0.45
+MARATHON_TAPER_LO = 10
+MARATHON_TAPER_HI = 16
+
+
+def _aggregate_marathon_skillsets(ett_values: Any) -> dict[str, float] | None:
+    """JS ``aggregateSkillsets``：ett values 键名首字母大写。"""
+    if not isinstance(ett_values, dict):
+        return None
+    jk = max(
+        float(ett_values.get("JackSpeed") or 0),
+        float(ett_values.get("Chordjack") or 0),
+    )
+    st = max(
+        float(ett_values.get("Stream") or 0),
+        float(ett_values.get("Jumpstream") or 0),
+    )
+    te = float(ett_values.get("Technical") or 0)
+    en = (0.7 * float(ett_values.get("Stamina") or 0)
+          + 0.3 * float(ett_values.get("Handstream") or 0))
+    total = jk + st + te + en
+    if not (total > 1):
+        return None
+    return {"jk": jk, "st": st, "te": te, "en": en, "total": total}
+
+
+def compute_marathon_correction(duration_s: Any, ett_values: Any, numeric: Any) -> float:
+    """JS ``computeMarathonCorrection``：返回修正量（numeric 单位），0 = 不修正。"""
+    if not (float(duration_s) > MARATHON_DURATION_THRESHOLD_S):
+        return 0.0
+    if not isinstance(numeric, (int, float)) or not math.isfinite(numeric):
+        return 0.0
+    num = float(numeric)
+
+    agg = _aggregate_marathon_skillsets(ett_values)
+    if not agg or (
+        max(agg["jk"], agg["st"], agg["te"], agg["en"]) / agg["total"]
+        >= MARATHON_BALANCE_RATIO
+    ):
+        return 0.0
+
+    excess_min = (float(duration_s) - MARATHON_DURATION_THRESHOLD_S) / 60.0
+    raw = min(MARATHON_CORRECTION_CAP, MARATHON_CORRECTION_SCALE * math.log1p(excess_min))
+    if raw <= 0:
+        return 0.0
+
+    taper = 1.0
+    if num >= MARATHON_TAPER_HI:
+        taper = 0.0
+    elif num > MARATHON_TAPER_LO:
+        taper = (MARATHON_TAPER_HI - num) / (MARATHON_TAPER_HI - MARATHON_TAPER_LO)
+    if not (taper > 0):
+        return 0.0
+
+    return raw * taper
+
+
 def _build_error_result(code: str, msg: str, ln: float = 0.0, cc: int = 0) -> dict[str, Any]:
     return {"star": math.nan, "lnRatio": ln, "columnCount": cc,
             "estDiff": f"Invalid: {msg}", "numericDifficulty": None,
@@ -443,7 +510,7 @@ def estimate_azusa_result(
     source: Any, speed_rate: float = 1.0, od_flag: Any = None, cvt_flag: Any = None,
     *, sunny_result: dict[str, Any] | None = None, daniel_result: dict[str, Any] | None = None,
     with_graph: bool = False, force_sunny_reference_ho: bool = True,
-    chart: Any = None,
+    chart: Any = None, marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if chart is not None:
         chart_obj = chart.clone()
@@ -540,6 +607,19 @@ def estimate_azusa_result(
     out = _calibrate_azusa_output_numeric(pre)
     ref = _compute_reference_correction(out, dnfb, sunny_numeric)
     final = _clamp(float(out) + ref, -2.0, 20.0)
+
+    # 马拉松时长修正（估算器内部应用）：上游注入 {durationS, ettValues}
+    # （缺省/无 MSD 时不触发），只降不升、对数饱和 + numeric taper；
+    # 应用后 estDiff/star 由修正后的 final 统一派生（JS azusaEstimator L962-976）。
+    if marathon_correction:
+        mcorr = compute_marathon_correction(
+            marathon_correction.get("durationS"),
+            marathon_correction.get("ettValues"),
+            final,
+        )
+        if mcorr > 0:
+            final = float(final) - mcorr
+
     est_diff = _numeric_to_rc_label(final)
 
     return {

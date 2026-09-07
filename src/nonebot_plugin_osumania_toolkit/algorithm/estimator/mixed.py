@@ -327,6 +327,7 @@ def _try_run_roxy_fallback(
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
     chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     # Roxy 入口吃谱面文本，此分支始终按文本路径自建解析。
     try:
@@ -342,6 +343,7 @@ def _try_run_roxy_fallback(
             cvt_flag,
             precomputed_sunny_result=sunny_result,
             chart=chart,
+            marathon_correction=marathon_correction,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -354,6 +356,7 @@ def _try_run_azusa_fallback(
     cvt_flag: Any,
     sunny_result: dict[str, Any] | None,
     chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     try:
         from .azusa import estimate_azusa_result
@@ -366,6 +369,7 @@ def _try_run_azusa_fallback(
             sunny_result=sunny_result,
             force_sunny_reference_ho=False,
             chart=chart,
+            marathon_correction=marathon_correction,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -412,6 +416,7 @@ def estimate_mixed_result(
     sunny_result: dict[str, Any] | None = None,
     *,
     chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JS ``runMixedEstimatorFromText`` 直译。
 
@@ -419,6 +424,9 @@ def estimate_mixed_result(
     （mapview）负责按 plan 调用 ``estimate_companella_result`` +
     ``apply_companella_to_mixed_result``，对应 JS app 层的
     ``applyCompanellaToMixedResult`` 消费流程。
+
+    ``marathon_correction``（{durationS, ettValues}）为马拉松时长修正通道，
+    沿 JS options.marathonCorrection 透传给 Roxy/Azusa 子估算器。
     """
     sunny = _ensure_sunny_result(
         source, speed_rate, od_flag, cvt_flag, sunny_result, chart
@@ -451,7 +459,8 @@ def estimate_mixed_result(
 
     if mixed_mode_tag == "RC":
         roxy_result = _try_run_roxy_fallback(
-            source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
+            source, speed_rate, od_flag, cvt_flag, sunny, chart=chart,
+            marathon_correction=marathon_correction,
         )
         if can_use_rc_result(roxy_result):
             selected_result = roxy_result
@@ -467,7 +476,8 @@ def estimate_mixed_result(
                 and should_evaluate_azusa_rc_preference(roxy_result)
             ):
                 azusa_result = _try_run_azusa_fallback(
-                    source, speed_rate, od_flag, cvt_flag, sunny, chart
+                    source, speed_rate, od_flag, cvt_flag, sunny, chart,
+                    marathon_correction=marathon_correction,
                 )
                 if should_prefer_azusa_rc_result(roxy_result, azusa_result):
                     selected_result = azusa_result
@@ -478,7 +488,8 @@ def estimate_mixed_result(
         elif not in_enabled:
             # 传 chart 复用已解析谱面，避免 azusa 内部对同一文件重复解析。
             azusa_result = _try_run_azusa_fallback(
-                source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
+                source, speed_rate, od_flag, cvt_flag, sunny, chart=chart,
+                marathon_correction=marathon_correction,
             )
             if can_use_rc_result(azusa_result):
                 selected_result = azusa_result

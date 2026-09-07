@@ -11,6 +11,7 @@ from .estimator.companella import estimate_companella_result
 from .estimator.mixed import apply_companella_to_mixed_result
 from .estimator.mixed import estimate_mixed_result
 from .estimator.shared import load_osu_chart
+from .estimator.shared import normalize_cvt_flags
 from .estimator.sunny import build_sunny_result
 from .pattern import PatternNotManiaError, PatternParseError, analyze_pattern_file
 from .estimator.exceptions import ParseError, NotManiaError
@@ -102,6 +103,41 @@ def _format_parse_error_detail(error: Exception, max_len: int = 240) -> str:
     return text
 
 
+def _build_marathon_correction(
+    chart: Any, speed_rate: float, cvt_flag: Any
+) -> dict[str, Any] | None:
+    """马拉松时长修正数据（JS runAnalysisPipeline L111-146 直译）。
+
+    仅 4K 且未缩放 noteStarts 首尾差 >300s 的 Azusa/Roxy/Mixed 候选才计算一次
+    ETT 并注入 ``{durationS, ettValues}``。etterna 失败 → 缺信号不触发（返回
+    None，等价于 JS marathonEttReuse.error 时不注入 options.marathonCorrection）。
+    ``durationS`` 取未缩放首尾差，与 JS 一致（speedRate 只影响估算器内部计算，
+    不影响马拉松时长阈值）。
+    """
+    column_count = int(getattr(chart, "column_count", 0) or 0)
+    starts = list(getattr(chart, "note_starts", None) or [])
+    if column_count != 4 or len(starts) < 2:
+        return None
+    duration_s = (max(starts) - min(starts)) / 1000.0
+    if not (duration_s > 300):
+        return None
+    try:
+        from .ett.calc import compute_difficulties
+
+        chart_mod = chart.clone()
+        in_enabled, ho_enabled, _ = normalize_cvt_flags(cvt_flag)
+        if in_enabled:
+            chart_mod.mod_IN()
+        if ho_enabled:
+            chart_mod.mod_HO()
+        ett_values = compute_difficulties(
+            chart_mod, music_rate=speed_rate, keycount=4
+        )
+    except Exception:  # noqa: BLE001 - 与 JS marathonEttReuse error 软失败同语义
+        return None
+    return {"durationS": duration_s, "ettValues": ett_values}
+
+
 async def analyze_mapview_chart(
     chart_file: Path,
     file_name: str,
@@ -145,6 +181,12 @@ async def analyze_mapview_chart(
     sunny_result = build_sunny_result(sr, ln_ratio, column_count)
     mixed_result: dict[str, Any] | None = None
 
+    # 马拉松时长修正通道：4K>300s 候选计算一次 ETT 注入 Mixed（其内部 Roxy/Azusa
+    # 子估算器按 JS options.marathonCorrection 语义应用），非候选返回 None。
+    marathon_correction = _build_marathon_correction(
+        base_chart, speed_rate, cvt_flag
+    )
+
     try:
         mixed_result = await asyncio.to_thread(
             estimate_mixed_result,
@@ -154,6 +196,7 @@ async def analyze_mapview_chart(
             cvt_flag,
             sunny_result,
             chart=base_chart.clone(),
+            marathon_correction=marathon_correction,
         )
         mixed_diff_text = str(mixed_result.get("estDiff", sunny_result["estDiff"]))
     except Exception:
