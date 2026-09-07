@@ -461,6 +461,17 @@ def estimate_azusa_result(
     if column_count != 4:
         return _build_error_result("UnsupportedKeys", "Azusa only supports 4K", ln_ratio, column_count)
 
+    # 与 JS azusaEstimator L852-858 同步: RC 模型的 LN 上限。lnRatio>0.18 时
+    # Azusa RC 器对 LN 主导谱面会输出无意义 RC 数值, 故入口处直接拒绝。
+    # 检查位于 buildTapNotes/TooShort 之前 (仅需 ln_ratio, 不调用 _build_tap_notes)。
+    if ln_ratio > AZUSA_CONFIG["rcLnRatioLimit"]:
+        return _build_error_result(
+            "UnsupportedLN",
+            f"Azusa RC scope rejects LN ratio {ln_ratio * 100:.1f}%",
+            ln_ratio,
+            column_count,
+        )
+
     taps = _build_tap_notes(parsed)
     if len(taps) < AZUSA_CONFIG["minNotes"]:
         return _build_error_result("TooShort", f"Insufficient notes for stable estimate ({len(taps)})", ln_ratio, column_count)
