@@ -20,6 +20,7 @@ from ...data.roxy_meta_model import (
     ROXY_META_SCALE,
 )
 from ...parser.osu_file_parser import osu_file
+from .azusa import compute_marathon_correction
 from .rc import numeric_to_rc_label
 
 try:  # shared.js_fixed 缺失时退回私有等价实现
@@ -1335,8 +1336,11 @@ def _build_reference_predictions(
     precomputed_sunny_result: dict[str, Any] | None = None,
     precomputed_daniel_result: dict[str, Any] | None = None,
     chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # JS L1167-1203 直译（wantsGraph 恒为 False，graph 不产出）。
+    # 与 JS buildReferencePredictions 一致：referenceOptions 透传 options
+    # （含 marathonCorrection）→ 内部 Azusa 参照同样应用马拉松修正。
     from .azusa import estimate_azusa_result
     from .daniel import estimate_daniel_result
     from .sunny import estimate_sunny_result
@@ -1363,6 +1367,7 @@ def _build_reference_predictions(
             daniel_result=daniel_result,
             force_sunny_reference_ho=False,
             chart=chart,
+            marathon_correction=marathon_correction,
         )
     )
 
@@ -1706,11 +1711,13 @@ def _compute_azusa_high_gap_lift(
 def _compute_azusa_fusion(
     reference_predictions: dict[str, Any], final_numeric: float
 ) -> float:
-    azusa = (
-        _to_float(reference_predictions.get("Azusa"))
-        if reference_predictions
-        else math.nan
-    )
+    # JS `Number(referencePredictions?.Azusa)` 语义：null→0（参与融合）、
+    # 缺引用/undefined→NaN（跳过融合）。
+    if reference_predictions is None:
+        azusa = math.nan
+    else:
+        azusa_raw = reference_predictions.get("Azusa")
+        azusa = 0.0 if azusa_raw is None else _to_float(azusa_raw)
     base = _to_float(final_numeric)
     if not math.isfinite(azusa) or not math.isfinite(base):
         return float(final_numeric)
@@ -1793,6 +1800,7 @@ def run_roxy_estimator_from_text(
     *,
     precomputed_sunny_result: dict[str, Any] | None = None,
     chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JS ``runRoxyEstimatorFromText`` 直译。
 
@@ -1876,6 +1884,7 @@ def run_roxy_estimator_from_text(
                 cvt_flag,
                 structural_numeric,
                 chart=chart,
+                marathon_correction=marathon_correction,
             )
             meta_features = _build_roxy_meta_features(
                 meta_predictions, numeric_details, curve, structural_numeric
@@ -1945,6 +1954,20 @@ def run_roxy_estimator_from_text(
             final_numeric = _compute_azusa_fusion(
                 meta_predictions, js_fixed(unguarded_numeric, 2)
             )
+
+            # 马拉松时长修正（估算器内部应用）：上游注入 {durationS, ettValues}
+            # （缺省/无 MSD 时不触发），只降不升、对数饱和 + numeric taper；
+            # 修正先于 scope 判定执行（贴边图修正后落入 BelowScope 由 Mixed 路由
+            # 同样成立），estDiff/star 由修正后数值统一派生（JS roxyEstimator
+            # L1572-1586）。
+            if marathon_correction:
+                mcorr = compute_marathon_correction(
+                    marathon_correction.get("durationS"),
+                    marathon_correction.get("ettValues"),
+                    final_numeric,
+                )
+                if mcorr > 0:
+                    final_numeric = final_numeric - mcorr
 
             if final_numeric < ROXY_SCOPE_MIN:
                 return _build_scope_result(
