@@ -330,6 +330,9 @@ def _try_run_roxy_fallback(
     marathon_correction: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     # Roxy 入口吃谱面文本，此分支始终按文本路径自建解析。
+    # 注意：不可向 roxy 传共享 chart——roxy 的 canonicalize 会把首音平移到
+    # 1000ms（时间原点改变），若 meta 参照基于未平移的原始 chart 计算，
+    # floor 边界/几何会与 JS（恒用 canonicalize 后文本自解析）分歧。
     try:
         from .roxy import run_roxy_estimator_from_text
 
@@ -342,7 +345,6 @@ def _try_run_roxy_fallback(
             od_flag,
             cvt_flag,
             precomputed_sunny_result=sunny_result,
-            chart=chart,
             marathon_correction=marathon_correction,
         )
     except Exception:  # noqa: BLE001

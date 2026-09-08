@@ -1,4 +1,5 @@
 import os
+import math
 import shutil
 import time
 import asyncio
@@ -261,9 +262,39 @@ async def analyze_mapview_chart(
         mod_line += f" ({', '.join(extra_parts)})"
 
     diff_top, diff_bottom = _split_diff_lines(mixed_diff_text)
-    star_bg = color._color_for(sr, STAR_BG_STOPS, "#6d7894")
-    star_text_pref = color._color_for(sr, STAR_TEXT_STOPS, "#f6fbff")
-    star_text = color._pick_readable_text_color(sr, star_bg, star_text_pref)
+
+    # 显示层对齐 JS 插件（analysis.js 用 pipelineResult.rework.* = Mixed 的
+    # 选中估计器结果）：star/LN%/Keys 以 Mixed 输出为准，Mixed 缺失或 NaN 时
+    # 回退 Sunny 基线值。
+    display_sr = sr
+    display_ln = ln_ratio
+    display_cc = column_count
+    if isinstance(mixed_result, dict):
+        m_star = mixed_result.get("star")
+        m_ln = mixed_result.get("lnRatio")
+        m_cc = mixed_result.get("columnCount")
+        try:
+            ms = float(m_star)
+            if math.isfinite(ms):
+                display_sr = ms
+        except (TypeError, ValueError):
+            pass
+        try:
+            ml = float(m_ln)
+            if math.isfinite(ml):
+                display_ln = ml
+        except (TypeError, ValueError):
+            pass
+        try:
+            mc = int(m_cc) if m_cc is not None else 0
+            if mc > 0:
+                display_cc = mc
+        except (TypeError, ValueError):
+            pass
+
+    star_bg = color._color_for(display_sr, STAR_BG_STOPS, "#6d7894")
+    star_text_pref = color._color_for(display_sr, STAR_TEXT_STOPS, "#f6fbff")
+    star_text = color._pick_readable_text_color(display_sr, star_bg, star_text_pref)
 
     return {
         "file_name": target_name,
@@ -271,12 +302,12 @@ async def analyze_mapview_chart(
             "status_text": _render_meta_title(meta_data),
             "mode_tag": pattern_result.report.ModeTag,
             "mode_tag_class": color._mode_tag_class(pattern_result.report.ModeTag),
-            "rework_star": f"{sr:.2f}",
+            "rework_star": f"{display_sr:.2f}",
             "star_bg_color": star_bg,
             "star_text_color": star_text,
             "rework_meta_lines": [
-                f"LN%: {ln_ratio:.2%}",
-                f"Keys: {column_count}K",
+                f"LN%: {display_ln:.2%}",
+                f"Keys: {display_cc}K",
                 f"Mods: {mod_line}",
             ],
             "rework_diff_top": diff_top,
