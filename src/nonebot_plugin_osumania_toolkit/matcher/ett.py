@@ -50,17 +50,27 @@ async def handle_ett(bot: Bot, event: Event):
 
     try:
         file_info = await platform.extract_replied_file(bot, event)
-        if not file_info:
-            await ett.finish("请回复一条包含文件的消息。")
+        file_name = ""
+        file_url = ""
 
-        if file_info:
-            file_name, file_url = file_info
-            file_name = safe_filename(os.path.basename(file_name))
+        if file_info is not None:
+            raw_name, raw_url = file_info
+            file_name = safe_filename(os.path.basename(raw_name))
             if not file_name.lower().endswith((".osu", ".mc", ".osz", ".mcz")):
-                await ett.finish("请回复 .osu/.mc/.osz/.mcz 格式的谱面文件。")
+                # 回复的不是谱面文件：有 bid 时退回 bid，否则提示全部可用输入方式
+                if bid is None:
+                    await ett.finish("回复的文件不是支持的谱面格式。请回复 .osu/.mc/.osz/.mcz 格式的谱面文件，或使用 /ett b<bid> x<rate> 指定谱面（如 /ett b4094064 x1.25）。")
+                await ett.send(f"回复的文件 {file_name} 不是谱面文件，已改用谱面 b{bid} 。")
+                file_info = None
+            else:
+                file_url = raw_url
 
+        if file_info is not None:
             tmp_file = CACHE_DIR / file_name
-            await download_file(file_url, tmp_file)
+            try:
+                await download_file(file_url, tmp_file)
+            except Exception as e:
+                await ett.finish(f"下载回复的文件失败：{e}")
 
             if file_name.lower().endswith((".osz", ".mcz")):
                 if platform.is_qq(bot):
@@ -179,7 +189,13 @@ async def handle_ett(bot: Bot, event: Event):
                 await ett.finish()
 
         elif bid is not None:
-            tmp_file, file_name = await download_file_by_id(CACHE_DIR, bid)
+            try:
+                tmp_file, file_name = await download_file_by_id(CACHE_DIR, bid)
+            except Exception as e:
+                await ett.finish(
+                    f"无法获取谱面 b{bid}：{e}\n"
+                    "请确认 bid 或谱面链接指向公开的 mania 谱面。"
+                )
             chart_file = tmp_file
 
             row = await analyze_ett_chart(
@@ -201,7 +217,11 @@ async def handle_ett(bot: Bot, event: Event):
             except Exception:
                 await ett.finish(format_ett_result_text(row))
         else:
-            await ett.finish("请回复包含 .osu/.mc/.osz/.mcz 文件的消息，或使用 bid/mania 谱面网址指定谱面。")
+            await ett.finish(
+                "请回复包含 .osu/.mc/.osz/.mcz 文件的消息，"
+                "或使用 bid/mania 谱面网址指定谱面。\n"
+                "例如：/ett b4094064 x1.25（倍速可选，范围 0.25~3.0）"
+            )
 
     except FinishedException:
         raise
