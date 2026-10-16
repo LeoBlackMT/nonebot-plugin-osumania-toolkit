@@ -25,7 +25,6 @@ from typing import Any
 
 from .rc import numeric_to_rc_label
 from .polaris import calibrate_table_halves
-from .companella_offset import apply_companella_offset
 from .shared import js_fixed, js_number, resolve_chart_path, normalize_cvt_flags
 
 MIXED_SUPPORTED_KEYS = {4, 6, 7}
@@ -257,43 +256,18 @@ def build_low_band_companella_plan(
     }
 
 
-def _apply_companella_post_correction(
-    *,
-    numeric: Any,
-    rc_label: Any,
-    side: str,
-    companella_level: Any,
-    companella_weight: Any = 1,
-) -> dict[str, Any]:
-    """JS ``applyCompanellaPostCorrection`` 直译：Companella 系统性偏移
-    （``companella_offset``）——修正该移植算法分量的尺度差。
-
-    只在 RC 侧低段（``level < 2.5 → +0.19``）施加；曾与之并列的 4K LN 后修正
-    （``ln_correction``，+0.5 门控）与高段一起在实机测试后被移除（把实机难度过分拉高）。
-    ``companella_weight``：当前数值中 Companella 的占比（纯 Companella = 1，
-    0.5/0.5 融合 = 0.5）——偏移刻画的是 Companella 分量的尺度差，融合值只有一半来自它，
-    必须按权重缩放。``companella_level``：偏移的层级查找键，恒取 **Companella 自身输出的
-    数值**（分段值就是在纯 Companella 行上按该值拟合的），与 numeric 是否已被融合无关。
-    """
-    return apply_companella_offset(
-        numeric=numeric,
-        rc_label=rc_label,
-        side=side,
-        level=companella_level,
-        companella_weight=companella_weight,
-    )
-
-
 def apply_companella_to_mixed_result(
     mixed_result: dict[str, Any], companella_result: dict[str, Any]
 ) -> dict[str, Any]:
-    """JS ``applyCompanellaToMixedResult`` 直译（含低难 fuseRc 融合路径）。"""
+    """JS ``applyCompanellaToMixedResult`` 直译（含低难 fuseRc 融合路径）。
+
+    4K 的后修正（Companella 系统性偏移与 4K LN 后修正）曾在本分支实装，实机复测仍见
+    高段受影响后**整体回退**——本函数回到合并语义本身：采纳或融合 Companella 数值、
+    重派生 estDiff、清空 plan 与打胶囊，不再叠加任何数值修正。
+    """
     plan = mixed_result.get("mixedCompanellaPlan")
     if not plan:
         return mixed_result
-
-    # 侧判定与行为数据集 / Polaris 同语义：lnRatio ≥ 0.375 记为 LN 侧。
-    side = "LN" if js_number(plan.get("lnRatio")) >= LN_SIDE_LN_RATIO_MIN else "RC"
 
     # 低难融合路径：Companella 与计划携带的 Azusa RC 基准做固定权重平均，
     # estDiff 由融合数值重新派生（numeric 与 estDiff 保持同源）。
@@ -314,22 +288,14 @@ def apply_companella_to_mixed_result(
 
         if rc_numeric >= RC_FUSION_LOW_BAND_MAX:
             if plan.get("onDisagree") == "companella":
-                # 数值整体来自 Companella，Companella 权重 = 1。
-                corrected = _apply_companella_post_correction(
-                    numeric=companella_result.get("numericDifficulty"),
-                    rc_label=companella_result.get("estDiff"),
-                    side=side,
-                    companella_level=companella_numeric,
-                    companella_weight=1,
-                )
                 return {
                     **mixed_result,
                     "estDiff": compose_difficulty_from_rc_ln(
-                        corrected["rcLabel"],
+                        companella_result.get("estDiff"),
                         plan.get("lnDifficulty"),
                         plan.get("lnRatio"),
                     ),
-                    "numericDifficulty": corrected["numeric"],
+                    "numericDifficulty": companella_result.get("numericDifficulty"),
                     "numericDifficultyHint": companella_result.get(
                         "numericDifficultyHint"
                     ),
@@ -342,46 +308,28 @@ def apply_companella_to_mixed_result(
         weight = RC_AZUSA_COMPANELLA_FUSION_WEIGHT
         # JS toFixed(2) 半进位语义（Decimal HALF_UP）。
         fused = js_fixed(rc_numeric * weight + companella_numeric * (1 - weight), 2)
-        # 融合值里 Companella 只占 (1 − weight)——0.5/0.5 融合下按 0.5 缩放偏移，
-        # 否则会把只占一半的 Companella 尺度差全额计入融合结果。
-        corrected = _apply_companella_post_correction(
-            numeric=fused,
-            rc_label=numeric_to_rc_label(fused),
-            side=side,
-            companella_level=companella_numeric,
-            companella_weight=1 - weight,
-        )
         return {
             **mixed_result,
             "estDiff": compose_difficulty_from_rc_ln(
-                corrected["rcLabel"],
+                numeric_to_rc_label(fused),
                 plan.get("lnDifficulty"),
                 plan.get("lnRatio"),
             ),
-            "numericDifficulty": corrected["numeric"],
+            "numericDifficulty": fused,
             "numericDifficultyHint": None,
             "mixedCompanellaPlan": None,
             # 胶囊来源：低难段的 0.5/0.5 融合——数值由 Azusa 与 Companella 共同决定。
             "companellaCapsule": "Azusa+Companella",
         }
 
-    # 无 fuseRc 计划（Azusa 不可用）：数值整体来自 Companella，权重 = 1，
-    # 层级键即该数值本身。
-    corrected = _apply_companella_post_correction(
-        numeric=companella_result.get("numericDifficulty"),
-        rc_label=companella_result.get("estDiff"),
-        side=side,
-        companella_level=companella_result.get("numericDifficulty"),
-        companella_weight=1,
-    )
     return {
         **mixed_result,
         "estDiff": compose_difficulty_from_rc_ln(
-            corrected["rcLabel"],
+            companella_result.get("estDiff"),
             plan.get("lnDifficulty"),
             plan.get("lnRatio"),
         ),
-        "numericDifficulty": corrected["numeric"],
+        "numericDifficulty": companella_result.get("numericDifficulty"),
         "numericDifficultyHint": companella_result.get("numericDifficultyHint"),
         "mixedCompanellaPlan": None,
         # 胶囊来源：无 fuseRc 计划（Azusa 不可用）时整体采用 Companella。

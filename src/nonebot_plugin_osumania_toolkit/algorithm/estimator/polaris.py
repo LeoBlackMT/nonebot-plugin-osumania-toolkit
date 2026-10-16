@@ -12,15 +12,9 @@ Mixed），而 Mixed 消费的正是这里的 ``calibrate_table_halves``——�
 校准结果，供 Mixed 取用 LN 半标签、并在 7K 上整条接管 RC 半。独立的
 ``runPolarisEstimatorFromText`` 入口没有消费者，故不移植。
 
-曲线集（与 JS ``has_polaris_curve`` 同一张表）：
-
-===========  ==========  ==========================================
-键数          RC 半       LN 半
-===========  ==========  ==========================================
-4K           无曲线       4K LN 曲线
-7K           7K RC 曲线   7K LN 曲线
-6K           无          无（有区间表但没有拟合曲线 ⇒ 保持表映射）
-===========  ==========  ==========================================
+曲线集（与 JS ``has_polaris_curve`` 同一张表）：**7K 专用**——RC / LN 两半各一套；
+其余键数（含 4K）一律无曲线。4K 曾有 LN 半曲线，实机测试后随 4K 侧全部回退（曲线集已删，
+其拟合系数与验证数字保留在 git 历史中）。
 
 修正模型：``corr(side, level, rate, ln_ratio)``
     ``= B(level) + R(level)·f(rate) + H(ln_ratio)``
@@ -217,82 +211,6 @@ _H_LN = (
     (0.99, 1.001),
 )
 
-# 4K LN 曲线（同一模型，独立系数）。4K 上只有 LN 半需要表校准：RC 半的最终答案
-# 来自 Mixed 的路由链（Roxy/Azusa/Daniel/Companella），不是表映射。
-# 拟合人群 n=2657（level 5.00~16.60），R 在拟合期即施加 >= 0 约束。
-_B_LN4_FIT = (
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    -0.160,
-    -0.254,
-    -0.280,
-    -0.129,
-    0.030,
-    0.128,
-    0.219,
-    0.218,
-    0.215,
-    0.158,
-    0.119,
-    0.108,
-    0.121,
-    0.104,
-    0.033,
-    0.025,
-    0.098,
-    0.237,
-    0.379,
-)
-
-_R_LN4_FIT = (
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.000,
-    0.032,
-    0.122,
-    0.122,
-    0.090,
-    0.070,
-    0.123,
-    0.172,
-    0.302,
-    0.400,
-    0.419,
-    0.301,
-    0.206,
-    0.207,
-    0.215,
-    0.294,
-    0.296,
-    0.306,
-    0.176,
-    0.016,
-)
-
-_H_LN4 = (
-    (0.4375, 0.025),
-    (0.575, 0.029),
-    (0.725, 0.032),
-    (0.85, 0.063),
-    (0.935, 0.177),
-    (0.99, 0.416),
-)
-
 _TIER_OFFSETS = {
     "low": -0.4,
     "mid/low": -0.2,
@@ -388,7 +306,6 @@ def _repair_polaris_curve(
 _REPAIRED = {
     "7K:RC": _repair_polaris_curve("RC", _B_RC_FIT, _R_RC_FIT),
     "7K:LN": _repair_polaris_curve("LN", _B_LN_FIT, _R_LN_FIT),
-    "4K:LN": _repair_polaris_curve("LN", _B_LN4_FIT, _R_LN4_FIT),
 }
 
 # 本模块加载时对**原始拟合系数**的单调性诊断。violations 为空即系数本身合规；
@@ -465,22 +382,14 @@ def _curve_for(key_count: Any, side: str) -> dict[str, Any] | None:
       - 6K / 10K：没有拟合数据（区间表存在，但没有对应曲线）。
     注意不能写成"非 4K 即 7K 曲线"：那样 6K 会被 7K 曲线静默校准。
     """
-    key = _number(key_count)
-    if key == 4:
-        return _REPAIRED["4K:LN"] if side == "LN" else None
-    if key == 7:
-        return _REPAIRED["7K:LN"] if side == "LN" else _REPAIRED["7K:RC"]
-    return None
+    if _number(key_count) != 7:
+        return None
+    return _REPAIRED["7K:LN"] if side == "LN" else _REPAIRED["7K:RC"]
 
 
 def has_polaris_curve(key_count: Any, side: str) -> bool:
     """该 (键数, 侧) 是否存在生效曲线。消费方以此判断"这一半是否被校准过"。"""
     return _curve_for(key_count, side) is not None
-
-
-def _ln_ratio_term_for(key_count: Any) -> tuple[tuple[float, float], ...]:
-    """LN 侧的 lnRatio 项（4K / 7K 各一套）。"""
-    return _H_LN4 if _number(key_count) == 4 else _H_LN
 
 
 # 与顶点一一对应的曲线插值（线性、端外截断）
@@ -540,7 +449,7 @@ def compute_polaris_correction(
     if r > 1.0:
         corr += _interp_curve(curve["R"], lv) * min(1.0, (r - 1.0) / 0.5)
     if side == "LN":
-        corr += _interp_knots(_ln_ratio_term_for(key_count), _number(ln_ratio))
+        corr += _interp_knots(_H_LN, _number(ln_ratio))
     return corr
 
 
