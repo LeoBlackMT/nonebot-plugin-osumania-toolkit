@@ -5,6 +5,15 @@
 Azusa；Roxy 不可用走 Azusa→Daniel）；LN/Mix 保持 Sunny 组合，4K 且 star<9 时
 产出 ``mixedCompanellaPlan`` 由上层应用，否则尝试 Daniel 替换 RC 段。
 
+两条与 Polaris 相关的路径（7K 与 LN 半）：
+- **LN 半标签**在任何路径下都来自 Sunny 的 LN 表，此前不被任何后修正触碰
+  （``ln_correction`` 只调 numeric，即 RC 半）。4K 的 Mixed 无法用 Polaris 替代
+  （其 RC 半来自路由链，优于表映射），所以这条校准必须落在 Mixed 里才能到达
+  4K 用户；7K 同样校准。
+- **7K 的两个入口**（RC 早退与 LN/Mix 树的 L5）不再停在未校准的 Sunny 表映射：
+  Mixed 的定位是"自动选出最佳算法"，7K 上 Azusa/Roxy/Daniel/Companella 全为 4K
+  专用，最佳即 Polaris。6K 有区间表但没有拟合曲线 ⇒ 保持 Sunny。
+
 与 JS 的结构性差异仅一处：Python 解析器是路径式的，Roxy 入口吃谱面文本，
 RC 分支先以 utf-8-sig 读出文本再调用。
 """
@@ -16,7 +25,10 @@ import math
 from typing import Any
 
 from .rc import numeric_to_rc_label
-from .shared import js_fixed, normalize_cvt_flags, resolve_chart_path
+from .polaris import calibrate_table_halves
+from .companella_offset import apply_companella_offset
+from .ln_correction import apply_ln_correction_to_rc_fields
+from .shared import js_fixed, js_number, resolve_chart_path, normalize_cvt_flags
 
 MIXED_SUPPORTED_KEYS = {4, 6, 7}
 
@@ -32,6 +44,9 @@ LOW_BAND_COMPANELLA_STAR_MAX = 9
 # （净收益 -4.89 → -2.87 MAE 点），已移除：分歧大小无法区分方向对错，
 # 净效应由权重平坦性保证。
 RC_FUSION_LOW_BAND_MAX = 11
+# 侧判定（与行为数据集 / Polaris 同语义）：lnRatio ≥ 0.375 记为 LN 侧。
+# 注意不能用 mode_tag_from_ln_ratio——后者的阈值是 0.15 / 0.9，与数据集分侧不同。
+LN_SIDE_LN_RATIO_MIN = 0.375
 
 AZUSA_RC_PREFERENCE = {
     "balancedHandScreenMaxBias": 0.006,
@@ -43,14 +58,6 @@ AZUSA_RC_PREFERENCE = {
     "azusaLowerScreenMaxDelta": -0.55,
     "azusaLowerMaxDelta": -0.7,
 }
-
-
-def _number(value: Any) -> float:
-    """JS ``Number()`` 等价：不可转时返回 NaN（不抛错）。"""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return math.nan
 
 
 def mode_tag_from_ln_ratio(ln_ratio: float) -> str:
@@ -78,7 +85,7 @@ def split_difficulty_parts(value: Any) -> dict[str, str]:
 def compose_difficulty_from_rc_ln(rc_label: Any, ln_label: Any, ln_ratio: Any) -> str:
     rc = str(rc_label or "").strip()
     ln = str(ln_label or "").strip()
-    ratio = float(ln_ratio) if isinstance(ln_ratio, (int, float)) else math.nan
+    ratio = js_number(ln_ratio)
 
     if not math.isfinite(ratio) or ratio < 0.15:
         return rc or ln or "-"
@@ -101,7 +108,7 @@ def can_use_rc_result(result: Any) -> bool:
         return False
 
     # Number(result.columnCount) !== 4（NaN 自然落空）。
-    if _number(result.get("columnCount")) != 4:
+    if js_number(result.get("columnCount")) != 4:
         return False
 
     est_diff = str(result.get("estDiff") or "").strip()
@@ -120,14 +127,18 @@ def can_use_rc_result(result: Any) -> bool:
 def can_use_daniel_result(result: Any) -> bool:
     if not result:
         return False
-    if _number(result.get("columnCount")) != 4:
+    if js_number(result.get("columnCount")) != 4:
         return False
     return not is_daniel_too_low_difficulty(result.get("estDiff"))
 
 
 def result_numeric_value(result: Any) -> float | None:
     raw = result.get("numericDifficulty") if isinstance(result, dict) else None
-    value = _number(raw)
+    # JS resultNumericValue 对 null / undefined 直接返回 null
+    # （不走 Number()，否则 null → 0）。
+    if raw is None:
+        return None
+    value = js_number(raw)
     return value if math.isfinite(value) else None
 
 
@@ -137,7 +148,7 @@ def roxy_unquantized_numeric(result: Any) -> float | None:
     debug = result.get("debug") if isinstance(result, dict) else None
     raw = debug.get("finalNumeric") if isinstance(debug, dict) else None
     if raw is not None and raw != "":
-        value = _number(raw)
+        value = js_number(raw)
         if math.isfinite(value):
             return value
     return result_numeric_value(result)
@@ -147,7 +158,9 @@ def _debug_stat_value(result: Any, name: str) -> float | None:
     debug = result.get("debug") if isinstance(result, dict) else None
     stats = debug.get("stats") if isinstance(debug, dict) else None
     raw = stats.get(name) if isinstance(stats, dict) else None
-    value = _number(raw)
+    if raw is None:
+        return None
+    value = js_number(raw)
     return value if math.isfinite(value) else None
 
 
@@ -156,7 +169,9 @@ def _debug_reference_value(result: Any, name: str) -> float | None:
     meta = debug.get("meta") if isinstance(debug, dict) else None
     references = meta.get("references") if isinstance(meta, dict) else None
     raw = references.get(name) if isinstance(references, dict) else None
-    value = _number(raw)
+    if raw is None:
+        return None
+    value = js_number(raw)
     return value if math.isfinite(value) else None
 
 
@@ -244,6 +259,41 @@ def build_low_band_companella_plan(
     }
 
 
+def _apply_companella_post_corrections(
+    *,
+    numeric: Any,
+    rc_label: Any,
+    ln_ratio: Any,
+    side: str,
+    companella_level: Any,
+    companella_weight: Any = 1,
+) -> dict[str, Any]:
+    """JS ``applyCompanellaPostCorrections`` 直译（顺序固定）：
+
+    1) Companella 系统性偏移（按侧 + 层级，``companella_offset``）
+       ——修正该移植算法分量的尺度差；
+    2) 4K LN 后修正（lnRatio 门控，``ln_correction``）——修正 LN 主导谱面的残余低估。
+
+    两级都只作用于 Companella 侧数值；未触发时逐位保持原行为。
+    ``companella_weight``：当前数值中 Companella 的占比（纯 Companella = 1，
+    0.5/0.5 融合 = 0.5）——偏移刻画的是 Companella 分量的尺度差，融合值只有一半来自它，
+    必须按权重缩放。``companella_level``：偏移的层级查找键，恒取 **Companella 自身输出的
+    数值**（分段值就是在纯 Companella 行上按该值拟合的），与 numeric 是否已被融合无关。
+    """
+    offset_applied = apply_companella_offset(
+        numeric=numeric,
+        rc_label=rc_label,
+        side=side,
+        level=companella_level,
+        companella_weight=companella_weight,
+    )
+    return apply_ln_correction_to_rc_fields(
+        numeric=offset_applied["numeric"],
+        rc_label=offset_applied["rcLabel"],
+        ln_ratio=ln_ratio,
+    )
+
+
 def apply_companella_to_mixed_result(
     mixed_result: dict[str, Any], companella_result: dict[str, Any]
 ) -> dict[str, Any]:
@@ -252,63 +302,103 @@ def apply_companella_to_mixed_result(
     if not plan:
         return mixed_result
 
+    # 侧判定与行为数据集 / Polaris 同语义：lnRatio ≥ 0.375 记为 LN 侧。
+    side = "LN" if js_number(plan.get("lnRatio")) >= LN_SIDE_LN_RATIO_MIN else "RC"
+
     # 低难融合路径：Companella 与计划携带的 Azusa RC 基准做固定权重平均，
     # estDiff 由融合数值重新派生（numeric 与 estDiff 保持同源）。
     # 门控：仅当 Azusa 数值低于 Alpha（低难主张成立）时融合；未通过时回落
     # onDisagree 指定的原赢家（RC 分支为 Azusa，Mix 分支为 Companella），
     # 行为与改动前一致。
     if plan.get("fuseRc"):
-        rc_numeric = _number(plan.get("rcNumeric"))
-        companella_numeric = _number(
-            companella_result.get("numericDifficulty") if companella_result else None
+        rc_numeric = js_number(plan.get("rcNumeric"))
+        # JS `Number(companellaResult?.numericDifficulty)`：companellaResult 缺失时是
+        # Number(undefined) = NaN（不是 0），故这里显式区分。
+        companella_numeric = (
+            js_number(companella_result.get("numericDifficulty"))
+            if companella_result
+            else math.nan
         )
         if not math.isfinite(rc_numeric) or not math.isfinite(companella_numeric):
             return mixed_result
 
         if rc_numeric >= RC_FUSION_LOW_BAND_MAX:
             if plan.get("onDisagree") == "companella":
+                # 数值整体来自 Companella，Companella 权重 = 1。
+                ln_corrected = _apply_companella_post_corrections(
+                    numeric=companella_result.get("numericDifficulty"),
+                    rc_label=companella_result.get("estDiff"),
+                    ln_ratio=plan.get("lnRatio"),
+                    side=side,
+                    companella_level=companella_numeric,
+                    companella_weight=1,
+                )
                 return {
                     **mixed_result,
                     "estDiff": compose_difficulty_from_rc_ln(
-                        companella_result.get("estDiff"),
+                        ln_corrected["rcLabel"],
                         plan.get("lnDifficulty"),
                         plan.get("lnRatio"),
                     ),
-                    "numericDifficulty": companella_result.get("numericDifficulty"),
+                    "numericDifficulty": ln_corrected["numeric"],
                     "numericDifficultyHint": companella_result.get(
                         "numericDifficultyHint"
                     ),
                     "mixedCompanellaPlan": None,
+                    # 胶囊来源：数值确实换成了 Companella 的结果。
+                    "companellaCapsule": "Companella",
                 }
             return mixed_result
 
         weight = RC_AZUSA_COMPANELLA_FUSION_WEIGHT
         # JS toFixed(2) 半进位语义（Decimal HALF_UP）。
-        fused = js_fixed(
-            rc_numeric * weight + companella_numeric * (1 - weight), 2
+        fused = js_fixed(rc_numeric * weight + companella_numeric * (1 - weight), 2)
+        # 融合值里 Companella 只占 (1 − weight)——0.5/0.5 融合下按 0.5 缩放偏移，
+        # 否则会把只占一半的 Companella 尺度差全额计入融合结果。
+        ln_corrected = _apply_companella_post_corrections(
+            numeric=fused,
+            rc_label=numeric_to_rc_label(fused),
+            ln_ratio=plan.get("lnRatio"),
+            side=side,
+            companella_level=companella_numeric,
+            companella_weight=1 - weight,
         )
         return {
             **mixed_result,
             "estDiff": compose_difficulty_from_rc_ln(
-                numeric_to_rc_label(fused),
+                ln_corrected["rcLabel"],
                 plan.get("lnDifficulty"),
                 plan.get("lnRatio"),
             ),
-            "numericDifficulty": fused,
+            "numericDifficulty": ln_corrected["numeric"],
             "numericDifficultyHint": None,
             "mixedCompanellaPlan": None,
+            # 胶囊来源：低难段的 0.5/0.5 融合——数值由 Azusa 与 Companella 共同决定。
+            "companellaCapsule": "Azusa+Companella",
         }
 
+    # 无 fuseRc 计划（Azusa 不可用）：数值整体来自 Companella，权重 = 1，
+    # 层级键即该数值本身。
+    ln_corrected = _apply_companella_post_corrections(
+        numeric=companella_result.get("numericDifficulty"),
+        rc_label=companella_result.get("estDiff"),
+        ln_ratio=plan.get("lnRatio"),
+        side=side,
+        companella_level=companella_result.get("numericDifficulty"),
+        companella_weight=1,
+    )
     return {
         **mixed_result,
         "estDiff": compose_difficulty_from_rc_ln(
-            companella_result.get("estDiff"),
+            ln_corrected["rcLabel"],
             plan.get("lnDifficulty"),
             plan.get("lnRatio"),
         ),
-        "numericDifficulty": companella_result.get("numericDifficulty"),
+        "numericDifficulty": ln_corrected["numeric"],
         "numericDifficultyHint": companella_result.get("numericDifficultyHint"),
         "mixedCompanellaPlan": None,
+        # 胶囊来源：无 fuseRc 计划（Azusa 不可用）时整体采用 Companella。
+        "companellaCapsule": "Companella",
     }
 
 
@@ -410,6 +500,22 @@ def _ensure_sunny_result(
     return estimate_sunny_result(source, speed_rate, od_flag, cvt_flag, chart=chart)
 
 
+def _resolved_rate(speed_rate: Any) -> float:
+    """JS ``Number(options.speedRate ?? 1.0) || 1.0`` 语义（0 与 NaN → 1.0）。"""
+    rate = js_number(speed_rate)
+    return 1.0 if (math.isnan(rate) or rate == 0.0) else rate
+
+
+def _polaris_numeric(half: dict[str, Any] | None) -> float | None:
+    """校准半边的数值输出口径：star 在表内才给外推数值（表外沿用边界标签语义）。
+
+    JS ``half.inRange ? Number(half.level.toFixed(2)) : null``。
+    """
+    if half is None:
+        return None
+    return js_fixed(half["level"], 2) if half["inRange"] else None
+
+
 def estimate_mixed_result(
     source: Any,
     speed_rate: float = 1.0,
@@ -434,7 +540,7 @@ def estimate_mixed_result(
         source, speed_rate, od_flag, cvt_flag, sunny_result, chart
     )
     actual_algorithm = "Sunny"
-    column_count = _number(sunny.get("columnCount"))
+    column_count = js_number(sunny.get("columnCount"))
     if not math.isfinite(column_count) or column_count not in MIXED_SUPPORTED_KEYS:
         return {
             **sunny,
@@ -443,14 +549,46 @@ def estimate_mixed_result(
         }
 
     in_enabled, ho_enabled, _ = normalize_cvt_flags(cvt_flag)
-    ln_ratio = float(sunny.get("lnRatio", 0.0))
+    has_explicit_od = od_flag is not None
+    ln_ratio = js_number(sunny.get("lnRatio"))
     mixed_mode_tag = "RC" if ho_enabled else mode_tag_from_ln_ratio(ln_ratio)
+    sunny_parts = split_difficulty_parts(sunny.get("estDiff"))
+
+    # 表映射两半的 Polaris 校准结果（与"选 Polaris"共用同一份实现，
+    # 两边不可能给出不同答案）：
+    #   - 4K：只有 LN 半边——4K RC 的最终答案来自路由链（Roxy/Azusa/Daniel/Companella），
+    #     不是表映射，没有可校准的对象；而 LN 半恒由 Sunny 的 LN 表给出。
+    #   - 7K：RC 与 LN 都有——7K 的 Mixed 在此之前恒为 Sunny 基线，
+    #     Polaris 就是那个"更佳"的选项。
+    #   - 6K：有区间表但没有拟合曲线 ⇒ 两半都是 None，保持 Sunny 表映射。
+    calibrated_halves = calibrate_table_halves(
+        column_count, sunny.get("star"), _resolved_rate(speed_rate), ln_ratio
+    )
+    # LN 半标签在任何路径下都来自 Sunny 的 LN 表，此前不被任何后修正触碰
+    # （ln_correction 只调 numeric，即 RC 半）。4K 的 Mixed 无法用 Polaris 替代
+    # （其 RC 半来自路由链，优于表映射），所以这条校准必须落在 Mixed 里才能到达 4K 用户。
+    ln_difficulty = (
+        calibrated_halves["ln"]["label"]
+        if calibrated_halves and calibrated_halves.get("ln")
+        else sunny_parts["ln"]
+    )
 
     if mixed_mode_tag == "RC" and column_count != 4:
+        # 非 4K 的 RC 谱面没有路由链可用（Azusa/Roxy/Daniel/Companella 全部 4K 专用）。
+        # 7K 另有一个更优选项：Polaris 的表修正（同一张区间表 + 行为数据拟合的平滑修正）。
+        if not (calibrated_halves and calibrated_halves.get("rc")):
+            return {
+                **sunny,
+                "mixedCompanellaPlan": None,
+                "actualEstimatorAlgorithm": actual_algorithm,
+            }
         return {
             **sunny,
+            "estDiff": calibrated_halves["rc"]["label"],
+            "numericDifficulty": _polaris_numeric(calibrated_halves["rc"]),
+            "numericDifficultyHint": None,
             "mixedCompanellaPlan": None,
-            "actualEstimatorAlgorithm": actual_algorithm,
+            "actualEstimatorAlgorithm": "Polaris",
         }
 
     selected_result: dict[str, Any] = dict(sunny)
@@ -461,7 +599,12 @@ def estimate_mixed_result(
 
     if mixed_mode_tag == "RC":
         roxy_result = _try_run_roxy_fallback(
-            source, speed_rate, od_flag, cvt_flag, sunny, chart=chart,
+            source,
+            speed_rate,
+            od_flag,
+            cvt_flag,
+            sunny,
+            chart=chart,
             marathon_correction=marathon_correction,
         )
         if can_use_rc_result(roxy_result):
@@ -471,14 +614,18 @@ def estimate_mixed_result(
             numeric_difficulty = roxy_result.get("numericDifficulty")
             numeric_difficulty_hint = roxy_result.get("numericDifficultyHint")
 
-            has_explicit_od = od_flag is not None
             if (
                 not in_enabled
                 and not has_explicit_od
                 and should_evaluate_azusa_rc_preference(roxy_result)
             ):
                 azusa_result = _try_run_azusa_fallback(
-                    source, speed_rate, od_flag, cvt_flag, sunny, chart,
+                    source,
+                    speed_rate,
+                    od_flag,
+                    cvt_flag,
+                    sunny,
+                    chart,
                     marathon_correction=marathon_correction,
                 )
                 if should_prefer_azusa_rc_result(roxy_result, azusa_result):
@@ -490,7 +637,12 @@ def estimate_mixed_result(
         elif not in_enabled:
             # 传 chart 复用已解析谱面，避免 azusa 内部对同一文件重复解析。
             azusa_result = _try_run_azusa_fallback(
-                source, speed_rate, od_flag, cvt_flag, sunny, chart=chart,
+                source,
+                speed_rate,
+                od_flag,
+                cvt_flag,
+                sunny,
+                chart=chart,
                 marathon_correction=marathon_correction,
             )
             if can_use_rc_result(azusa_result):
@@ -502,12 +654,11 @@ def estimate_mixed_result(
                 # 低难段（Roxy scope-out 且 Sunny star<9）：RC 数值升级为
                 # Azusa⊕Companella 融合；门控未通过或 Companella 失败时，
                 # 本结果（纯 Azusa）兜底——与改动前行为一致。
-                if _number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
-                    sunny_parts = split_difficulty_parts(sunny.get("estDiff"))
+                if js_number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
                     companella_plan = build_low_band_companella_plan(
                         azusa_result,
                         ln_ratio,
-                        sunny_parts["ln"],
+                        ln_difficulty,
                         "azusa",
                     )
             else:
@@ -521,15 +672,12 @@ def estimate_mixed_result(
                     numeric_difficulty = daniel_result.get("numericDifficulty")
                     numeric_difficulty_hint = daniel_result.get("numericDifficultyHint")
     else:
-        sunny_parts = split_difficulty_parts(sunny.get("estDiff"))
-        ln_ratio = float(sunny.get("lnRatio", 0.0))
-        ln_difficulty = sunny_parts["ln"]
         rc_difficulty = sunny_parts["rc"]
         rc_numeric_difficulty = sunny.get("numericDifficulty")
         rc_numeric_difficulty_hint = sunny.get("numericDifficultyHint")
 
         if column_count == 4:
-            if _number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
+            if js_number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
                 # JS L334-356：低难 4K 的 RC 段以 Azusa 为基准与 Companella
                 # 融合（0.5/0.5）；Azusa 无效时保留纯 Companella 行为。
                 azusa_result = _try_run_azusa_fallback(
@@ -538,9 +686,7 @@ def estimate_mixed_result(
                 if can_use_rc_result(azusa_result):
                     rc_difficulty = str(azusa_result.get("estDiff", rc_difficulty))
                     rc_numeric_difficulty = azusa_result.get("numericDifficulty")
-                    rc_numeric_difficulty_hint = azusa_result.get(
-                        "numericDifficultyHint"
-                    )
+                    rc_numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
                     actual_algorithm = "Azusa"
                     companella_plan = build_low_band_companella_plan(
                         azusa_result, ln_ratio, ln_difficulty, "companella"
@@ -562,12 +708,20 @@ def estimate_mixed_result(
                         "numericDifficultyHint"
                     )
                     actual_algorithm = "Daniel"
+        elif calibrated_halves and calibrated_halves.get("rc"):
+            # L5 的 7K：不再停在未校准的 Sunny 表映射。Mixed 的定位是"自动选出最佳算法"，
+            # 7K 上没有 Azusa/Roxy/Daniel/Companella（全部 4K 专用），最佳就是 Polaris——
+            # 同一张区间表 + 行为数据拟合的平滑修正。6K 无曲线，仍走 Sunny。
+            rc_difficulty = calibrated_halves["rc"]["label"]
+            rc_numeric_difficulty = _polaris_numeric(calibrated_halves["rc"])
+            rc_numeric_difficulty_hint = None
+            actual_algorithm = "Polaris"
 
         est_diff = compose_difficulty_from_rc_ln(rc_difficulty, ln_difficulty, ln_ratio)
         numeric_difficulty = rc_numeric_difficulty
         numeric_difficulty_hint = rc_numeric_difficulty_hint
 
-    forced_ln_ratio = 0.0 if ho_enabled else _number(selected_result.get("lnRatio"))
+    forced_ln_ratio = 0.0 if ho_enabled else js_number(selected_result.get("lnRatio"))
     if not math.isfinite(forced_ln_ratio):
         forced_ln_ratio = 0.0
 
