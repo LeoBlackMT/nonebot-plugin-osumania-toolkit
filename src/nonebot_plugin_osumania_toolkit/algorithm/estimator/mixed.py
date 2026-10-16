@@ -6,10 +6,9 @@ Azusa；Roxy 不可用走 Azusa→Daniel）；LN/Mix 保持 Sunny 组合，4K �
 产出 ``mixedCompanellaPlan`` 由上层应用，否则尝试 Daniel 替换 RC 段。
 
 两条与 Polaris 相关的路径（7K 与 LN 半）：
-- **LN 半标签**在任何路径下都来自 Sunny 的 LN 表，此前不被任何后修正触碰
-  （``ln_correction`` 只调 numeric，即 RC 半）。4K 的 Mixed 无法用 Polaris 替代
-  （其 RC 半来自路由链，优于表映射），所以这条校准必须落在 Mixed 里才能到达
-  4K 用户；7K 同样校准。
+- **LN 半标签**在任何路径下都来自 Sunny 的 LN 表，表校准（下）是它唯一被触碰的地方。
+  4K 的 Mixed 无法用 Polaris 替代（其 RC 半来自路由链，优于表映射），所以这条校准
+  必须落在 Mixed 里才能到达 4K 用户；7K 同样校准。
 - **7K 的两个入口**（RC 早退与 LN/Mix 树的 L5）不再停在未校准的 Sunny 表映射：
   Mixed 的定位是"自动选出最佳算法"，7K 上 Azusa/Roxy/Daniel/Companella 全为 4K
   专用，最佳即 Polaris。6K 有区间表但没有拟合曲线 ⇒ 保持 Sunny。
@@ -27,7 +26,6 @@ from typing import Any
 from .rc import numeric_to_rc_label
 from .polaris import calibrate_table_halves
 from .companella_offset import apply_companella_offset
-from .ln_correction import apply_ln_correction_to_rc_fields
 from .shared import js_fixed, js_number, resolve_chart_path, normalize_cvt_flags
 
 MIXED_SUPPORTED_KEYS = {4, 6, 7}
@@ -259,38 +257,30 @@ def build_low_band_companella_plan(
     }
 
 
-def _apply_companella_post_corrections(
+def _apply_companella_post_correction(
     *,
     numeric: Any,
     rc_label: Any,
-    ln_ratio: Any,
     side: str,
     companella_level: Any,
     companella_weight: Any = 1,
 ) -> dict[str, Any]:
-    """JS ``applyCompanellaPostCorrections`` 直译（顺序固定）：
+    """JS ``applyCompanellaPostCorrection`` 直译：Companella 系统性偏移
+    （``companella_offset``）——修正该移植算法分量的尺度差。
 
-    1) Companella 系统性偏移（按侧 + 层级，``companella_offset``）
-       ——修正该移植算法分量的尺度差；
-    2) 4K LN 后修正（lnRatio 门控，``ln_correction``）——修正 LN 主导谱面的残余低估。
-
-    两级都只作用于 Companella 侧数值；未触发时逐位保持原行为。
+    只在 RC 侧低段（``level < 2.5 → +0.19``）施加；曾与之并列的 4K LN 后修正
+    （``ln_correction``，+0.5 门控）与高段一起在实机测试后被移除（把实机难度过分拉高）。
     ``companella_weight``：当前数值中 Companella 的占比（纯 Companella = 1，
     0.5/0.5 融合 = 0.5）——偏移刻画的是 Companella 分量的尺度差，融合值只有一半来自它，
     必须按权重缩放。``companella_level``：偏移的层级查找键，恒取 **Companella 自身输出的
     数值**（分段值就是在纯 Companella 行上按该值拟合的），与 numeric 是否已被融合无关。
     """
-    offset_applied = apply_companella_offset(
+    return apply_companella_offset(
         numeric=numeric,
         rc_label=rc_label,
         side=side,
         level=companella_level,
         companella_weight=companella_weight,
-    )
-    return apply_ln_correction_to_rc_fields(
-        numeric=offset_applied["numeric"],
-        rc_label=offset_applied["rcLabel"],
-        ln_ratio=ln_ratio,
     )
 
 
@@ -325,10 +315,9 @@ def apply_companella_to_mixed_result(
         if rc_numeric >= RC_FUSION_LOW_BAND_MAX:
             if plan.get("onDisagree") == "companella":
                 # 数值整体来自 Companella，Companella 权重 = 1。
-                ln_corrected = _apply_companella_post_corrections(
+                corrected = _apply_companella_post_correction(
                     numeric=companella_result.get("numericDifficulty"),
                     rc_label=companella_result.get("estDiff"),
-                    ln_ratio=plan.get("lnRatio"),
                     side=side,
                     companella_level=companella_numeric,
                     companella_weight=1,
@@ -336,11 +325,11 @@ def apply_companella_to_mixed_result(
                 return {
                     **mixed_result,
                     "estDiff": compose_difficulty_from_rc_ln(
-                        ln_corrected["rcLabel"],
+                        corrected["rcLabel"],
                         plan.get("lnDifficulty"),
                         plan.get("lnRatio"),
                     ),
-                    "numericDifficulty": ln_corrected["numeric"],
+                    "numericDifficulty": corrected["numeric"],
                     "numericDifficultyHint": companella_result.get(
                         "numericDifficultyHint"
                     ),
@@ -355,10 +344,9 @@ def apply_companella_to_mixed_result(
         fused = js_fixed(rc_numeric * weight + companella_numeric * (1 - weight), 2)
         # 融合值里 Companella 只占 (1 − weight)——0.5/0.5 融合下按 0.5 缩放偏移，
         # 否则会把只占一半的 Companella 尺度差全额计入融合结果。
-        ln_corrected = _apply_companella_post_corrections(
+        corrected = _apply_companella_post_correction(
             numeric=fused,
             rc_label=numeric_to_rc_label(fused),
-            ln_ratio=plan.get("lnRatio"),
             side=side,
             companella_level=companella_numeric,
             companella_weight=1 - weight,
@@ -366,11 +354,11 @@ def apply_companella_to_mixed_result(
         return {
             **mixed_result,
             "estDiff": compose_difficulty_from_rc_ln(
-                ln_corrected["rcLabel"],
+                corrected["rcLabel"],
                 plan.get("lnDifficulty"),
                 plan.get("lnRatio"),
             ),
-            "numericDifficulty": ln_corrected["numeric"],
+            "numericDifficulty": corrected["numeric"],
             "numericDifficultyHint": None,
             "mixedCompanellaPlan": None,
             # 胶囊来源：低难段的 0.5/0.5 融合——数值由 Azusa 与 Companella 共同决定。
@@ -379,10 +367,9 @@ def apply_companella_to_mixed_result(
 
     # 无 fuseRc 计划（Azusa 不可用）：数值整体来自 Companella，权重 = 1，
     # 层级键即该数值本身。
-    ln_corrected = _apply_companella_post_corrections(
+    corrected = _apply_companella_post_correction(
         numeric=companella_result.get("numericDifficulty"),
         rc_label=companella_result.get("estDiff"),
-        ln_ratio=plan.get("lnRatio"),
         side=side,
         companella_level=companella_result.get("numericDifficulty"),
         companella_weight=1,
@@ -390,11 +377,11 @@ def apply_companella_to_mixed_result(
     return {
         **mixed_result,
         "estDiff": compose_difficulty_from_rc_ln(
-            ln_corrected["rcLabel"],
+            corrected["rcLabel"],
             plan.get("lnDifficulty"),
             plan.get("lnRatio"),
         ),
-        "numericDifficulty": ln_corrected["numeric"],
+        "numericDifficulty": corrected["numeric"],
         "numericDifficultyHint": companella_result.get("numericDifficultyHint"),
         "mixedCompanellaPlan": None,
         # 胶囊来源：无 fuseRc 计划（Azusa 不可用）时整体采用 Companella。
@@ -564,9 +551,9 @@ def estimate_mixed_result(
     calibrated_halves = calibrate_table_halves(
         column_count, sunny.get("star"), _resolved_rate(speed_rate), ln_ratio
     )
-    # LN 半标签在任何路径下都来自 Sunny 的 LN 表，此前不被任何后修正触碰
-    # （ln_correction 只调 numeric，即 RC 半）。4K 的 Mixed 无法用 Polaris 替代
-    # （其 RC 半来自路由链，优于表映射），所以这条校准必须落在 Mixed 里才能到达 4K 用户。
+    # LN 半标签在任何路径下都来自 Sunny 的 LN 表，表校准（上）是它唯一被触碰的地方。
+    # 4K 的 Mixed 无法用 Polaris 替代（其 RC 半来自路由链，优于表映射），
+    # 所以这条校准必须落在 Mixed 里才能到达 4K 用户。
     ln_difficulty = (
         calibrated_halves["ln"]["label"]
         if calibrated_halves and calibrated_halves.get("ln")
