@@ -588,9 +588,9 @@ def calibrate_table_halves(
     """某一个键数下**表映射两半**的 Polaris 校准结果（Mixed 与 JS 侧共用同一份实现）。
 
     两半在混合路由里都只是"表映射产物"，因此这是它们唯一的校准入口。哪一半返回非 None
-    由**曲线集**决定（``has_polaris_curve``）：4K 只有 LN 半边（RC 的最终答案来自路由链，
-    不是表），7K 两半都有，**6K 都没有**——它有区间表但没有拟合曲线，因此两半都是 None，
-    消费方据此保持原表映射（Mixed 的 6K 即走 Sunny）。
+    由**曲线集**决定（``has_polaris_curve``）：7K 两半都有，其余键数（含 4K/6K）都没有——
+    它们有区间表但没有拟合曲线，因此两半都返回 None，消费方据此保持原表映射
+    （Mixed 的 4K/6K 即走 Sunny；4K 曾有 LN 半校准，实机测试后随 4K 侧全部回退）。
 
     :param column_count: 键数
     :param star: Sunny 原始 sr

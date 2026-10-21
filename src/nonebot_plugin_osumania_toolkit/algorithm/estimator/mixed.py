@@ -5,13 +5,12 @@
 Azusa；Roxy 不可用走 Azusa→Daniel）；LN/Mix 保持 Sunny 组合，4K 且 star<9 时
 产出 ``mixedCompanellaPlan`` 由上层应用，否则尝试 Daniel 替换 RC 段。
 
-两条与 Polaris 相关的路径（7K 与 LN 半）：
-- **LN 半标签**在任何路径下都来自 Sunny 的 LN 表，表校准（下）是它唯一被触碰的地方。
-  4K 的 Mixed 无法用 Polaris 替代（其 RC 半来自路由链，优于表映射），所以这条校准
-  必须落在 Mixed 里才能到达 4K 用户；7K 同样校准。
+表映射两半的 Polaris 校准（7K 专用）：
 - **7K 的两个入口**（RC 早退与 LN/Mix 树的 L5）不再停在未校准的 Sunny 表映射：
-  Mixed 的定位是"自动选出最佳算法"，7K 上 Azusa/Roxy/Daniel/Companella 全为 4K
-  专用，最佳即 Polaris。6K 有区间表但没有拟合曲线 ⇒ 保持 Sunny。
+  Mixed 的定位是"自动选出最佳算法"，7K 上没有 Azusa/Roxy/Daniel/Companella（全部 4K
+  专用），最佳即 Polaris（同一张区间表 + 行为数据拟合的平滑修正）。
+- **4K / 6K**：有区间表但没有拟合曲线 ⇒ 两半都是 None，保持 Sunny 表映射
+  （4K 曾有 LN 半校准，实机测试后随 4K 侧全部回退）。
 
 与 JS 的结构性差异仅一处：Python 解析器是路径式的，Roxy 入口吃谱面文本，
 RC 分支先以 utf-8-sig 读出文本再调用。
@@ -41,9 +40,6 @@ LOW_BAND_COMPANELLA_STAR_MAX = 9
 # （净收益 -4.89 → -2.87 MAE 点），已移除：分歧大小无法区分方向对错，
 # 净效应由权重平坦性保证。
 RC_FUSION_LOW_BAND_MAX = 11
-# 侧判定（与行为数据集 / Polaris 同语义）：lnRatio ≥ 0.375 记为 LN 侧。
-# 注意不能用 mode_tag_from_ln_ratio——后者的阈值是 0.15 / 0.9，与数据集分侧不同。
-LN_SIDE_LN_RATIO_MIN = 0.375
 
 AZUSA_RC_PREFERENCE = {
     "balancedHandScreenMaxBias": 0.006,
@@ -491,17 +487,12 @@ def estimate_mixed_result(
 
     # 表映射两半的 Polaris 校准结果（与"选 Polaris"共用同一份实现，
     # 两边不可能给出不同答案）：
-    #   - 4K：只有 LN 半边——4K RC 的最终答案来自路由链（Roxy/Azusa/Daniel/Companella），
-    #     不是表映射，没有可校准的对象；而 LN 半恒由 Sunny 的 LN 表给出。
-    #   - 7K：RC 与 LN 都有——7K 的 Mixed 在此之前恒为 Sunny 基线，
-    #     Polaris 就是那个"更佳"的选项。
-    #   - 6K：有区间表但没有拟合曲线 ⇒ 两半都是 None，保持 Sunny 表映射。
+    #   - 7K：RC 与 LN 都有——7K 的 Mixed 恒为 Sunny 基线，Polaris 就是那个"更佳"的选项。
+    #   - 4K / 6K：有区间表但没有拟合曲线 ⇒ 两半都是 None，保持 Sunny 表映射
+    #     （4K 曾有 LN 半校准，实机测试后随 4K 侧全部回退）。
     calibrated_halves = calibrate_table_halves(
         column_count, sunny.get("star"), _resolved_rate(speed_rate), ln_ratio
     )
-    # LN 半标签在任何路径下都来自 Sunny 的 LN 表，表校准（上）是它唯一被触碰的地方。
-    # 4K 的 Mixed 无法用 Polaris 替代（其 RC 半来自路由链，优于表映射），
-    # 所以这条校准必须落在 Mixed 里才能到达 4K 用户。
     ln_difficulty = (
         calibrated_halves["ln"]["label"]
         if calibrated_halves and calibrated_halves.get("ln")
@@ -616,7 +607,13 @@ def estimate_mixed_result(
                 # JS L334-356：低难 4K 的 RC 段以 Azusa 为基准与 Companella
                 # 融合（0.5/0.5）；Azusa 无效时保留纯 Companella 行为。
                 azusa_result = _try_run_azusa_fallback(
-                    source, speed_rate, od_flag, cvt_flag, sunny, chart
+                    source,
+                    speed_rate,
+                    od_flag,
+                    cvt_flag,
+                    sunny,
+                    chart=chart,
+                    marathon_correction=marathon_correction,
                 )
                 if can_use_rc_result(azusa_result):
                     rc_difficulty = str(azusa_result.get("estDiff", rc_difficulty))
