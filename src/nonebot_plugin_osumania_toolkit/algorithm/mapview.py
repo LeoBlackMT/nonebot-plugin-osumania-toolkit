@@ -1,25 +1,24 @@
 import os
 import math
-import shutil
 import time
+import shutil
 import asyncio
-from pathlib import Path
 from typing import Any
+from pathlib import Path
+
 from nonebot import get_plugin_config
 
-from .conversion import convert_mc_to_osu
-from .estimator.companella import estimate_companella_result
-from .estimator.mixed import apply_companella_to_mixed_result
-from .estimator.mixed import estimate_mixed_result
-from .estimator.shared import load_osu_chart
-from .estimator.shared import normalize_cvt_flags
-from .estimator.sunny import build_sunny_result
-from .pattern import PatternNotManiaError, PatternParseError, analyze_pattern_file
-from .estimator.exceptions import ParseError, NotManiaError
-from .rework.rework import get_rework_result
-from .utils import extract_zip_file, is_mc_file, resolve_meta_data
-from ..data.color import sr_color
 from ..config import Config
+from ..data.color import sr_color
+from .conversion import convert_mc_to_osu
+from .rework.rework import get_rework_result
+from .estimator.sunny import build_sunny_result
+from .estimator.exceptions import ParseError, NotManiaError
+from .estimator.companella import estimate_companella_result
+from .estimator.shared import load_osu_chart, normalize_cvt_flags
+from .utils import is_mc_file, extract_zip_file, resolve_meta_data
+from .pattern import PatternParseError, PatternNotManiaError, analyze_pattern_file
+from .estimator.mixed import estimate_mixed_result, apply_companella_to_mixed_result
 
 config = get_plugin_config(Config)
 color = sr_color()
@@ -27,10 +26,12 @@ color = sr_color()
 STAR_BG_STOPS = sr_color.STAR_BG_STOPS
 STAR_TEXT_STOPS = sr_color.STAR_TEXT_STOPS
 
+
 def _specific_types_text(specific_types: list[tuple[str, float]]) -> str:
     if not specific_types:
         return ""
     return ", ".join(f"{name} ({ratio * 100:.1f}%)" for name, ratio in specific_types)
+
 
 def _merge_duplicate_clusters(clusters: list[Any]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
@@ -131,9 +132,7 @@ def _build_marathon_correction(
             chart_mod.mod_IN()
         if ho_enabled:
             chart_mod.mod_HO()
-        ett_values = compute_difficulties(
-            chart_mod, music_rate=speed_rate, keycount=4
-        )
+        ett_values = compute_difficulties(chart_mod, music_rate=speed_rate, keycount=4)
     except Exception:  # noqa: BLE001 - 与 JS marathonEttReuse error 软失败同语义
         return None
     return {"durationS": duration_s, "ettValues": ett_values}
@@ -172,7 +171,10 @@ async def analyze_mapview_chart(
 
     try:
         sr, ln_ratio, column_count = await get_rework_result(
-            str(target_file), speed_rate, od_flag, cvt_flag,
+            str(target_file),
+            speed_rate,
+            od_flag,
+            cvt_flag,
             chart=base_chart.clone(),
         )
     except ParseError as e:
@@ -184,9 +186,7 @@ async def analyze_mapview_chart(
 
     # 马拉松时长修正通道：4K>300s 候选计算一次 ETT 注入 Mixed（其内部 Roxy/Azusa
     # 子估算器按 JS options.marathonCorrection 语义应用），非候选返回 None。
-    marathon_correction = _build_marathon_correction(
-        base_chart, speed_rate, cvt_flag
-    )
+    marathon_correction = _build_marathon_correction(base_chart, speed_rate, cvt_flag)
 
     try:
         mixed_result = await asyncio.to_thread(
@@ -213,10 +213,35 @@ async def analyze_mapview_chart(
                 sunny_result=sunny_result,
                 chart=base_chart.clone(),
             )
-            mixed_result = apply_companella_to_mixed_result(mixed_result, companella_result)
+            mixed_result = apply_companella_to_mixed_result(
+                mixed_result, companella_result
+            )
             mixed_diff_text = str(mixed_result.get("estDiff", mixed_diff_text))
         except Exception:
             pass
+
+    # 极高难截断：对齐 tosu (analysis.js lines 1197-1206)
+    # numericDifficulty >= 18.5 属于超纲，RC 部分统一显示为 "> Cloverwisp Theta high"
+    resolved_numeric_difficulty: float | None = None
+    if isinstance(mixed_result, dict):
+        raw_numeric = mixed_result.get("numericDifficulty")
+        try:
+            if raw_numeric is not None:
+                val = float(raw_numeric)
+                if math.isfinite(val):
+                    resolved_numeric_difficulty = val
+        except (TypeError, ValueError):
+            pass
+
+    if resolved_numeric_difficulty is not None and resolved_numeric_difficulty >= 18.5:
+        if mixed_diff_text:
+            str_list = [part.strip() for part in mixed_diff_text.split("||")]
+            str_list[0] = "> Cloverwisp Theta high"
+            mixed_diff_text = " || ".join(p for p in str_list if p)
+        else:
+            mixed_diff_text = "> Cloverwisp Theta high"
+        if isinstance(mixed_result, dict):
+            mixed_result["numericDifficulty"] = None
 
     try:
         pattern_result = await analyze_pattern_file(str(target_file), rate=speed_rate)
