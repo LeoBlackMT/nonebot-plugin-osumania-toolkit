@@ -2,8 +2,10 @@
 
 路由链与 JS 一致：RC 模式先 Roxy（未开 IN 且无显式 OD 时按
 ``shouldEvaluateAzusaRcPreference``/``shouldPreferAzusaRcResult`` 评估是否换路
-Azusa；Roxy 不可用走 Azusa→Daniel）；LN/Mix 保持 Sunny 组合，4K 且 star<9 时
-产出 ``mixedCompanellaPlan`` 由上层应用，否则尝试 Daniel 替换 RC 段。
+Azusa；Roxy 胜出后 R3' 与 XDC1 做对称 0.5/0.5 融合，分歧 ≥0.50 时切向纯 XDC1；
+Roxy 不可用走 Azusa→Daniel，其中 Azusa 低难段带 ``xdc1Candidate`` 供 C8' 兜底、
+高段越界触发 R4-Hi 的 Azusa⊕XDC1 对称融合）；LN/Mix 保持 Sunny 组合，4K 且
+star<9 时产出 ``mixedCompanellaPlan`` 由上层应用，否则尝试 Daniel 替换 RC 段。
 
 表映射两半的 Polaris 校准（7K 专用）：
 - **7K 的两个入口**（RC 早退与 LN/Mix 树的 L5）不再停在未校准的 Sunny 表映射：
@@ -23,10 +25,19 @@ import math
 from typing import Any
 
 from .rc import numeric_to_rc_label
+from .xdc1 import estimate_xdc1_result
 from .polaris import calibrate_table_halves
 from .shared import js_fixed, js_number, resolve_chart_path, normalize_cvt_flags
 
 MIXED_SUPPORTED_KEYS = {4, 6, 7}
+
+# JS L8-17: 4K RC 树 Roxy 与 XDC1 的双向分歧阈值：|XDC1 − Roxy| ≥ 0.50 时切向 XDC1，
+# 否则取对称 0.5/0.5 融合（降低单模型误差方差）；高段 Roxy 越界后 Azusa⊕XDC1 亦用
+# 同一权重，低难 C8' 融合仍用 0.50 阈值在明显低估时切向 XDC1，全部取自然对称参数
+# 避免拟合基准。
+XDC1_RC_DISCREPANCY_MIN_DELTA = 0.5
+XDC1_RC_OVERRIDE_MIN_DELTA = 0.5
+XDC1_RC_FUSION_WEIGHT = 0.5
 
 # JS L8-17: Roxy→Azusa 换路的两组阈值（screen 预筛用宽阈值，最终判定用严阈值）。
 # JS L9-19: 低难段（Roxy scope-out 或 Sunny star<9）RC 部分的 Azusa⊕Companella 融合。
@@ -123,6 +134,53 @@ def can_use_daniel_result(result: Any) -> bool:
     if js_number(result.get("columnCount")) != 4:
         return False
     return not is_daniel_too_low_difficulty(result.get("estDiff"))
+
+
+def can_use_xdc1_rc_result(result: Any) -> bool:
+    """JS ``canUseXdc1RcResult`` 直译（unsupported / Invalid / Unsupported 均不可用）。"""
+    if not isinstance(result, dict) or not result:
+        return False
+    if result.get("unsupported") is True:
+        return False
+    if js_number(result.get("columnCount")) != 4:
+        return False
+
+    est_diff = str(result.get("estDiff") or "").strip()
+    if not est_diff or re.match(
+        r"^(Invalid|Unsupported)\b", est_diff, flags=re.IGNORECASE
+    ):
+        return False
+
+    return result_numeric_value(result) is not None
+
+
+def _js_round(value: float) -> int:
+    """JS ``Math.round``（.5 一律向上，含负数：-0.5 → 0）。"""
+    return int(math.floor(value + 0.5))
+
+
+def is_delta_at_least(delta: float, threshold: float) -> bool:
+    """JS ``isDeltaAtLeast``：量化到 1e-4，避免 IEEE-754 把 0.50 写成 0.4999…"""
+    if not math.isfinite(delta) or not math.isfinite(threshold):
+        return False
+    return _js_round(delta * 1e4) >= _js_round(threshold * 1e4)
+
+
+def has_active_marathon_correction(marathon_correction: Any, base_numeric: Any) -> bool:
+    """JS ``hasActiveMarathonCorrection``：该数值是否会被马拉松修正真正抬高。
+
+    JS 从 ``options.marathonCorrection`` 读取；Python 的 ``estimate_mixed_result``
+    直接收同一个 dict，故此处按同一结构判断 ``{durationS, ettValues}``。
+    """
+    mc = marathon_correction
+    if not isinstance(mc, dict):
+        return False
+    duration = js_number(mc.get("durationS"))
+    if not math.isfinite(duration):
+        return False
+    from .azusa import compute_marathon_correction
+
+    return compute_marathon_correction(duration, mc.get("ettValues"), base_numeric) > 0
 
 
 def result_numeric_value(result: Any) -> float | None:
@@ -233,6 +291,7 @@ def build_low_band_companella_plan(
     ln_ratio: Any,
     ln_difficulty: Any,
     on_disagree: str,
+    xdc1_candidate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JS ``buildLowBandCompanellaPlan`` 直译。
 
@@ -240,8 +299,9 @@ def build_low_band_companella_plan(
     ``apply_companella_to_mixed_result`` 在 Companella 结果到达后做 0.5/0.5 融合。
     ``on_disagree`` 指定门控未通过时保留哪一侧（该分支改动前的原赢家），
     保证融合只在两参考一致且都主张低难时生效，其余行为与改动前一致。
+    ``xdc1_candidate`` 供 C8' 判定：融合后仍显著低于 XDC1（≥0.50）时兜底切向 XDC1。
     """
-    return {
+    plan: dict[str, Any] = {
         "lnRatio": ln_ratio,
         "lnDifficulty": ln_difficulty,
         "fuseRc": True,
@@ -250,6 +310,9 @@ def build_low_band_companella_plan(
         "rcNumeric": result_numeric_value(rc_result),
         "rcNumericHint": rc_result.get("numericDifficultyHint", None),
     }
+    if xdc1_candidate:
+        plan["xdc1Candidate"] = xdc1_candidate
+    return plan
 
 
 def apply_companella_to_mixed_result(
@@ -304,6 +367,30 @@ def apply_companella_to_mixed_result(
         weight = RC_AZUSA_COMPANELLA_FUSION_WEIGHT
         # JS toFixed(2) 半进位语义（Decimal HALF_UP）。
         fused = js_fixed(rc_numeric * weight + companella_numeric * (1 - weight), 2)
+
+        # C8'：融合后仍显著低于 XDC1（≥0.50）时兜底切向 XDC1 的 RC 段与数值。
+        xdc1_candidate = plan.get("xdc1Candidate")
+        xdc1_numeric = result_numeric_value(xdc1_candidate)
+        if (
+            xdc1_candidate
+            and xdc1_numeric is not None
+            and is_delta_at_least(xdc1_numeric - fused, XDC1_RC_OVERRIDE_MIN_DELTA)
+        ):
+            return {
+                **mixed_result,
+                "estDiff": compose_difficulty_from_rc_ln(
+                    xdc1_candidate.get("estDiff"),
+                    plan.get("lnDifficulty"),
+                    plan.get("lnRatio"),
+                ),
+                "numericDifficulty": xdc1_candidate.get("numericDifficulty"),
+                "numericDifficultyHint": xdc1_candidate.get("numericDifficultyHint"),
+                "mixedCompanellaPlan": None,
+                "actualEstimatorAlgorithm": "XDC1",
+                # 胶囊来源：低难融合后仍显著低于 XDC1（≥0.50），兜底改用 XDC1。
+                "companellaCapsule": "XDC1",
+            }
+
         return {
             **mixed_result,
             "estDiff": compose_difficulty_from_rc_ln(
@@ -414,6 +501,124 @@ def _try_run_daniel_fallback(
         )
     except Exception:  # noqa: BLE001
         return None
+
+
+def _try_run_xdc1_fallback(
+    source: Any,
+    speed_rate: float,
+    od_flag: Any,
+    cvt_flag: Any,
+    *,
+    chart: Any = None,
+    with_graph: bool = False,
+) -> dict[str, Any] | None:
+    """JS ``tryRunXdc1Fallback``：XDC1 失败/不支持时按 catch 返回 None。"""
+    try:
+        return estimate_xdc1_result(
+            source,
+            speed_rate,
+            od_flag,
+            cvt_flag,
+            chart=chart,
+            with_graph=with_graph,
+        )
+    except Exception:  # noqa: BLE001 - 与 JS try/catch 同语义
+        return None
+
+
+def fuse_symmetric_rc_values(xdc1_numeric: float, base_numeric: float) -> float:
+    """JS ``fuseSymmetricRcValues``：0.5/0.5 对称融合并按 toFixed(2) 量化。"""
+    return js_fixed(
+        xdc1_numeric * XDC1_RC_FUSION_WEIGHT + base_numeric * (1 - XDC1_RC_FUSION_WEIGHT),
+        2,
+    )
+
+
+def build_fused_rc_outcome(
+    base_result: dict[str, Any],
+    xdc1_numeric: float,
+    base_numeric: float,
+    algorithm_name: str,
+) -> dict[str, Any]:
+    fused = fuse_symmetric_rc_values(xdc1_numeric, base_numeric)
+    return {
+        "selectedRework": base_result,
+        "actualAlgorithm": algorithm_name,
+        "estDiff": numeric_to_rc_label(fused),
+        "numericDifficulty": fused,
+        "numericDifficultyHint": None,
+    }
+
+
+def resolve_roxy_xdc1_rc_outcome(
+    source: Any,
+    speed_rate: float,
+    od_flag: Any,
+    cvt_flag: Any,
+    roxy_result: dict[str, Any],
+    *,
+    chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
+    with_graph: bool = False,
+) -> dict[str, Any] | None:
+    """JS ``resolveRoxyXdc1RcOutcome``（R3'）：切向纯 XDC1 或 Roxy+XDC1 对称融合。"""
+    roxy_numeric = result_numeric_value(roxy_result)
+    if roxy_numeric is None or not math.isfinite(roxy_numeric):
+        return None
+    if has_active_marathon_correction(marathon_correction, roxy_numeric):
+        return None
+    preview = _try_run_xdc1_fallback(
+        source, speed_rate, od_flag, cvt_flag, chart=chart, with_graph=False
+    )
+    if not can_use_xdc1_rc_result(preview):
+        return None
+    xdc1_numeric = result_numeric_value(preview)
+    if xdc1_numeric is None:
+        return None
+    if is_delta_at_least(abs(xdc1_numeric - roxy_numeric), XDC1_RC_DISCREPANCY_MIN_DELTA):
+        selected_xdc1 = (
+            _try_run_xdc1_fallback(
+                source, speed_rate, od_flag, cvt_flag, chart=chart, with_graph=True
+            )
+            if with_graph
+            else None
+        ) or preview
+        return {
+            "selectedRework": selected_xdc1,
+            "actualAlgorithm": "XDC1",
+            "estDiff": selected_xdc1.get("estDiff"),
+            "numericDifficulty": selected_xdc1.get("numericDifficulty"),
+            "numericDifficultyHint": selected_xdc1.get("numericDifficultyHint"),
+        }
+    return build_fused_rc_outcome(roxy_result, xdc1_numeric, roxy_numeric, "Roxy+XDC1")
+
+
+def resolve_high_azusa_xdc1_rc_outcome(
+    source: Any,
+    speed_rate: float,
+    od_flag: Any,
+    cvt_flag: Any,
+    azusa_result: dict[str, Any],
+    *,
+    chart: Any = None,
+    marathon_correction: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """JS ``resolveHighAzusaXdc1RcOutcome``（R4-Hi）：高段 Azusa⊕XDC1 对称融合。"""
+    azusa_numeric = result_numeric_value(azusa_result)
+    if azusa_numeric is None or not math.isfinite(azusa_numeric):
+        return None
+    if azusa_numeric < RC_FUSION_LOW_BAND_MAX:
+        return None
+    if has_active_marathon_correction(marathon_correction, azusa_numeric):
+        return None
+    preview = _try_run_xdc1_fallback(
+        source, speed_rate, od_flag, cvt_flag, chart=chart, with_graph=False
+    )
+    if not can_use_xdc1_rc_result(preview):
+        return None
+    return build_fused_rc_outcome(
+        azusa_result, result_numeric_value(preview), azusa_numeric, "XDC1+Azusa"
+    )
 
 
 def _ensure_sunny_result(
@@ -560,6 +765,24 @@ def estimate_mixed_result(
                     est_diff = str(azusa_result.get("estDiff", est_diff))
                     numeric_difficulty = azusa_result.get("numericDifficulty")
                     numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
+            # R3'：未触发 R2 Azusa 压高估保护时，以对称 0.5*(XDC1+Roxy) 融合收敛偏差，
+            # 分歧达到双向 0.50 以上时直接切向 XDC1（保留 IN/显式 OD/马拉松保护）。
+            if actual_algorithm == "Roxy" and not in_enabled and not has_explicit_od:
+                resolved_rc = resolve_roxy_xdc1_rc_outcome(
+                    source,
+                    speed_rate,
+                    od_flag,
+                    cvt_flag,
+                    roxy_result,
+                    chart=chart,
+                    marathon_correction=marathon_correction,
+                )
+                if resolved_rc:
+                    selected_result = resolved_rc["selectedRework"]
+                    actual_algorithm = resolved_rc["actualAlgorithm"]
+                    est_diff = str(resolved_rc["estDiff"])
+                    numeric_difficulty = resolved_rc["numericDifficulty"]
+                    numeric_difficulty_hint = resolved_rc["numericDifficultyHint"]
         elif not in_enabled:
             # 传 chart 复用已解析谱面，避免 azusa 内部对同一文件重复解析。
             azusa_result = _try_run_azusa_fallback(
@@ -578,15 +801,62 @@ def estimate_mixed_result(
                 numeric_difficulty = azusa_result.get("numericDifficulty")
                 numeric_difficulty_hint = azusa_result.get("numericDifficultyHint")
                 # 低难段（Roxy scope-out 且 Sunny star<9）：RC 数值升级为
-                # Azusa⊕Companella 融合；门控未通过或 Companella 失败时，
-                # 本结果（纯 Azusa）兜底——与改动前行为一致。
+                # Azusa⊕Companella 融合；若融合后仍显著低于 XDC1（≥0.50），
+                # 由 C8' 切向 XDC1。高段越界（star >= 9 且 Azusa >= 11）：
+                # Azusa⊕XDC1 0.5/0.5 对称融合。
                 if js_number(sunny.get("star")) < LOW_BAND_COMPANELLA_STAR_MAX:
+                    xdc1_candidate: dict[str, Any] | None = None
+                    azusa_numeric = result_numeric_value(azusa_result)
+                    if (
+                        not has_explicit_od
+                        and azusa_numeric is not None
+                        and math.isfinite(azusa_numeric)
+                        and azusa_numeric < RC_FUSION_LOW_BAND_MAX
+                        and not has_active_marathon_correction(
+                            marathon_correction, azusa_numeric
+                        )
+                    ):
+                        xdc1_preview = _try_run_xdc1_fallback(
+                            source,
+                            speed_rate,
+                            od_flag,
+                            cvt_flag,
+                            chart=chart,
+                            with_graph=False,
+                        )
+                        if can_use_xdc1_rc_result(xdc1_preview):
+                            xdc1_candidate = {
+                                "estDiff": xdc1_preview.get("estDiff"),
+                                "numericDifficulty": xdc1_preview.get(
+                                    "numericDifficulty"
+                                ),
+                                "numericDifficultyHint": xdc1_preview.get(
+                                    "numericDifficultyHint"
+                                ),
+                            }
                     companella_plan = build_low_band_companella_plan(
                         azusa_result,
                         ln_ratio,
                         ln_difficulty,
                         "azusa",
+                        xdc1_candidate,
                     )
+                elif not has_explicit_od:
+                    high_fused = resolve_high_azusa_xdc1_rc_outcome(
+                        source,
+                        speed_rate,
+                        od_flag,
+                        cvt_flag,
+                        azusa_result,
+                        chart=chart,
+                        marathon_correction=marathon_correction,
+                    )
+                    if high_fused:
+                        selected_result = high_fused["selectedRework"]
+                        actual_algorithm = high_fused["actualAlgorithm"]
+                        est_diff = str(high_fused["estDiff"])
+                        numeric_difficulty = high_fused["numericDifficulty"]
+                        numeric_difficulty_hint = high_fused["numericDifficultyHint"]
             else:
                 daniel_result = _try_run_daniel_fallback(
                     source, speed_rate, od_flag, cvt_flag, sunny, chart=chart
