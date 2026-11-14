@@ -412,14 +412,35 @@ def _compute_curve_gap_residual_correction(
     return _clamp(res, -1.2, 1.2)
 
 
-def _compute_reference_correction(ae: float, dn: float | None, sn: float | None) -> float:
+def _compute_reference_correction(
+    ae: float, dn: float | None, sn: float | None, curve_hints: Any = None
+) -> float:
     x = float(ae)
     if not math.isfinite(x) or x < 10.0 or x > 17.5:
         return 0.0
     if x < 11.5:
         gt, cd, cs_ = _clamp((x - 10.0) / 1.5, 0.0, 1.0), 0.10, 0.06
     elif x < 12.5:
-        gt, cd, cs_ = 1.0, 0.20, 0.13
+        gt = 1.0
+        # 11.5–12.5 带内按 Daniel 参照与 chordRate 决定系数：
+        # 非 chord 主导（chordRate < 0.45）的谱面在 Daniel > 12 时抬升权重。
+        ref_d = dn if dn is not None and math.isfinite(dn) else x
+        chord_rate = None
+        if isinstance(curve_hints, dict):
+            raw_chord = curve_hints.get("chordRate")
+            if isinstance(raw_chord, (int, float)) and math.isfinite(float(raw_chord)):
+                chord_rate = float(raw_chord)
+        stream_weight = (
+            _clamp((0.45 - chord_rate) / 0.15, 0.0, 1.0)
+            if chord_rate is not None
+            else 1.0
+        )
+        if ref_d > 12.0 and stream_weight > 0:
+            t = _clamp((ref_d - 12.0) / 0.8, 0.0, 1.0) * stream_weight
+            cd = 0.20 + (0.20 * t)
+            cs_ = 0.13 + (0.12 * t)
+        else:
+            cd, cs_ = 0.20, 0.13
     elif x < 16.0:
         gt, cd, cs_ = 1.0, 0.40, 0.25
     else:
@@ -605,7 +626,7 @@ def estimate_azusa_result(
     cgr = _compute_curve_gap_residual_correction(cal, blend, {"anchorImbalance": ai, "chordRate": cr, "jackQ95": jq}, primary_numeric, sunny_numeric, dnfb)
     pre = _clamp(float(cal) + cgr, -2.0, 20.0)
     out = _calibrate_azusa_output_numeric(pre)
-    ref = _compute_reference_correction(out, dnfb, sunny_numeric)
+    ref = _compute_reference_correction(out, dnfb, sunny_numeric, {"chordRate": cr})
     final = _clamp(float(out) + ref, -2.0, 20.0)
 
     # 马拉松时长修正（估算器内部应用）：上游注入 {durationS, ettValues}
