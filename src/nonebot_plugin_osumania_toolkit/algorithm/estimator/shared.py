@@ -11,7 +11,7 @@ from ...parser.osu_file_parser import osu_file
 
 # 已解析谱面缓存（路径 + mtime + 大小 为键）。clone 成本（~0.1ms）远低于重新解析
 # （~30ms），命中时一律返回 clone，调用方的改写（mod_IN/HO 等）不会污染缓存。
-_CHART_CACHE_MAX = 4
+_CHART_CACHE_MAX = 64
 _chart_cache: OrderedDict[tuple[str, int, int], osu_file] = OrderedDict()
 _chart_cache_lock = threading.Lock()
 
