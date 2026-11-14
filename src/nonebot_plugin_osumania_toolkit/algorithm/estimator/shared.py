@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 import threading
-from collections import OrderedDict
-from decimal import Decimal, ROUND_HALF_UP
-from pathlib import Path
 from typing import Any
+from pathlib import Path
+from collections import OrderedDict
+from decimal import ROUND_HALF_UP, Decimal
 
 from ...parser.osu_file_parser import osu_file
 
@@ -18,6 +19,32 @@ _chart_cache_lock = threading.Lock()
 def js_fixed(x: float, d: int = 2) -> float:
     """JS ``Number(x.toFixed(d))`` 语义（Decimal HALF_UP，平局向 +∞）。"""
     return float(Decimal(x).quantize(Decimal(1).scaleb(-d), rounding=ROUND_HALF_UP))
+
+
+def js_number(value: Any) -> float:
+    """JS ``Number()`` 等价（不可转时返回 NaN，不抛错）。
+
+    与 Python ``float()`` 的关键差异都在"非数值输入"上，且都会影响对拍结果：
+    ``None`` → **0**（不是 NaN）、``True``/``False`` → 1/0、空白串 → 0。
+    这是 JS 侧 ``Number(null) === 0`` 的经典语义，本仓库在 Roxy 融合处已踩过一次；
+    凡是对 JS ``Number(...)`` 的直译都必须走本函数，不要用 ``float()`` 代替。
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return 0.0
+        try:
+            return float(text)
+        except ValueError:
+            return math.nan
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return math.nan
 
 
 def normalize_cvt_flags(value: Any) -> tuple[bool, bool, str]:

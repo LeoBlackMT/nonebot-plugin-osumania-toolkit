@@ -132,6 +132,10 @@ ROXY_SCOPE_MAX_LABEL = "> Emik Zeta high"
 ROXY_META_ALGOS: list[str] = ["Azusa", "Sunny", "Daniel", "Roxy"]
 ROXY_REFERENCE_BUCKET_SIZE = 1.0
 ROXY_DISABLED_META_REFERENCES = {"Sunny"}
+# JS roxyMetaModel.generated.js: 退化特征（训练集几乎无覆盖）的标准化取值钳制到
+# 「关闭状态 f=0」水平 ±|mean/scale|，避免训练集外的取值主宰模型输出。
+# 目前名单只有 corr_lowCj（其余 corr_* 的病态程度低若干量级）。
+ROXY_META_DEGENERATE_FEATURES = {"corr_lowCj"}
 ROXY_REFERENCE_GAP_FEATURE_MEAN: list[float] = [
     0.07809006,
     0.29256211,
@@ -316,7 +320,9 @@ def _power_mean(values: list[float], p: float) -> float:
 def _top_tail_mean(sorted_values: list[float], ratio: float) -> float:
     if not sorted_values:
         return 0.0
-    count = max(1, math.ceil(len(sorted_values) * ratio))
+    # JS topTailMean: clamp(ratio, 0.01, 1) 后 Math.round(n*frac)（.5 向上）。
+    frac = _clamp(ratio, 0.01, 1.0)
+    count = max(1, int(math.floor(len(sorted_values) * frac + 0.5)))
     total = sum(sorted_values[len(sorted_values) - count:])
     return total / count
 
@@ -1543,9 +1549,11 @@ def evaluate_roxy_meta_model(features: Any) -> float:
     value = ROXY_META_BETA[0]
     for i in range(len(ROXY_META_FEATURE_NAMES)):
         scale = ROXY_META_SCALE[i] if ROXY_META_SCALE[i] else 1
-        value += ROXY_META_BETA[i + 1] * (
-            (_to_float(features[i]) - ROXY_META_MEAN[i]) / scale
-        )
+        z = (_to_float(features[i]) - ROXY_META_MEAN[i]) / scale
+        if ROXY_META_FEATURE_NAMES[i] in ROXY_META_DEGENERATE_FEATURES:
+            off_z = abs(ROXY_META_MEAN[i] / scale)
+            z = _clamp(z, -off_z, off_z)
+        value += ROXY_META_BETA[i + 1] * z
     return _clamp(value, -2, 30)
 
 
