@@ -5,6 +5,7 @@ import shutil
 import asyncio
 from typing import Any
 from pathlib import Path
+from dataclasses import dataclass
 
 from nonebot import get_plugin_config
 
@@ -138,30 +139,26 @@ def _build_marathon_correction(
     return {"durationS": duration_s, "ettValues": ett_values}
 
 
-async def analyze_mapview_chart(
-    chart_file: Path,
-    file_name: str,
+@dataclass(slots=True)
+class MapviewAnalysis:
+    """一次 /mapview 分析所需的全部中间结果（不含展示层格式化）。"""
+
+    meta_data: Any
+    star: float
+    ln_ratio: float
+    column_count: int
+    mixed_result: dict[str, Any] | None
+    mixed_diff_text: str
+    pattern_result: Any
+
+
+async def _compute_mapview_analysis(
+    target_file: Path,
+    target_name: str,
     speed_rate: float,
     od_flag: str | float | None,
     cvt_flag: list[str],
-    mod_display: str,
-    cache_dir: Path,
-) -> dict[str, Any]:
-    target_file = chart_file
-    target_name = file_name
-
-    if is_mc_file(str(target_file)):
-        try:
-            osu_file_path = await asyncio.to_thread(
-                convert_mc_to_osu,
-                str(target_file),
-                str(cache_dir),
-            )
-            target_file = Path(osu_file_path)
-            target_name = os.path.basename(osu_file_path)
-        except Exception as e:
-            raise ParseError(f".mc 转 .osu 失败: {e}") from e
-
+) -> MapviewAnalysis:
     # 单次解析，各消费者拿 clone。
     try:
         base_chart = await asyncio.to_thread(load_osu_chart, str(target_file))
@@ -198,6 +195,7 @@ async def analyze_mapview_chart(
             sunny_result,
             chart=base_chart.clone(),
             marathon_correction=marathon_correction,
+            roxy_debug_mode="lite",
         )
         mixed_diff_text = str(mixed_result.get("estDiff", sunny_result["estDiff"]))
     except Exception:
@@ -257,7 +255,25 @@ async def analyze_mapview_chart(
     ):
         meta_data = resolve_meta_data(target_file, target_name)
 
-    merged_clusters = _merge_duplicate_clusters(pattern_result.report.Clusters)
+    return MapviewAnalysis(
+        meta_data=meta_data,
+        star=sr,
+        ln_ratio=ln_ratio,
+        column_count=column_count,
+        mixed_result=mixed_result,
+        mixed_diff_text=mixed_diff_text,
+        pattern_result=pattern_result,
+    )
+
+
+def _build_mapview_template(
+    analysis: MapviewAnalysis,
+    file_name: str,
+    speed_rate: float,
+    od_flag: str | float | None,
+    mod_display: str,
+) -> dict[str, Any]:
+    merged_clusters = _merge_duplicate_clusters(analysis.pattern_result.report.Clusters)
     top_five = merged_clusters[:5]
     while len(top_five) < 5:
         top_five.append({"label": "-", "amount": 0.0, "subtype": "-"})
@@ -286,14 +302,15 @@ async def analyze_mapview_chart(
     if extra_parts:
         mod_line += f" ({', '.join(extra_parts)})"
 
-    diff_top, diff_bottom = _split_diff_lines(mixed_diff_text)
+    diff_top, diff_bottom = _split_diff_lines(analysis.mixed_diff_text)
 
     # 显示层对齐 JS 插件（analysis.js 用 pipelineResult.rework.* = Mixed 的
     # 选中估计器结果）：star/LN%/Keys 以 Mixed 输出为准，Mixed 缺失或 NaN 时
     # 回退 Sunny 基线值。
-    display_sr = sr
-    display_ln = ln_ratio
-    display_cc = column_count
+    display_sr = analysis.star
+    display_ln = analysis.ln_ratio
+    display_cc = analysis.column_count
+    mixed_result = analysis.mixed_result
     if isinstance(mixed_result, dict):
         m_star = mixed_result.get("star")
         m_ln = mixed_result.get("lnRatio")
@@ -322,23 +339,57 @@ async def analyze_mapview_chart(
     star_text = color._pick_readable_text_color(display_sr, star_bg, star_text_pref)
 
     return {
+        "status_text": _render_meta_title(analysis.meta_data),
+        "mode_tag": analysis.pattern_result.report.ModeTag,
+        "mode_tag_class": color._mode_tag_class(analysis.pattern_result.report.ModeTag),
+        "rework_star": f"{display_sr:.2f}",
+        "star_bg_color": star_bg,
+        "star_text_color": star_text,
+        "rework_meta_lines": [
+            f"LN%: {display_ln:.2%}",
+            f"Keys: {display_cc}K",
+            f"Mods: {mod_line}",
+        ],
+        "rework_diff_top": diff_top,
+        "rework_diff_bottom": diff_bottom,
+        "clusters": cluster_rows,
+    }
+
+
+async def analyze_mapview_chart(
+    chart_file: Path,
+    file_name: str,
+    speed_rate: float,
+    od_flag: str | float | None,
+    cvt_flag: list[str],
+    mod_display: str,
+    cache_dir: Path,
+) -> dict[str, Any]:
+    """`/mapview` 单张谱面的统一入口：分析结果缓存 + 展示层模板一次产出。"""
+    target_file = chart_file
+    target_name = file_name
+
+    if is_mc_file(str(target_file)):
+        try:
+            osu_file_path = await asyncio.to_thread(
+                convert_mc_to_osu,
+                str(target_file),
+                str(cache_dir),
+            )
+            target_file = Path(osu_file_path)
+            target_name = os.path.basename(osu_file_path)
+        except Exception as e:
+            raise ParseError(f".mc 转 .osu 失败: {e}") from e
+
+    analysis = await _compute_mapview_analysis(
+        target_file, target_name, speed_rate, od_flag, cvt_flag
+    )
+
+    return {
         "file_name": target_name,
-        "template": {
-            "status_text": _render_meta_title(meta_data),
-            "mode_tag": pattern_result.report.ModeTag,
-            "mode_tag_class": color._mode_tag_class(pattern_result.report.ModeTag),
-            "rework_star": f"{display_sr:.2f}",
-            "star_bg_color": star_bg,
-            "star_text_color": star_text,
-            "rework_meta_lines": [
-                f"LN%: {display_ln:.2%}",
-                f"Keys: {display_cc}K",
-                f"Mods: {mod_line}",
-            ],
-            "rework_diff_top": diff_top,
-            "rework_diff_bottom": diff_bottom,
-            "clusters": cluster_rows,
-        },
+        "template": _build_mapview_template(
+            analysis, target_name, speed_rate, od_flag, mod_display
+        ),
     }
 
 

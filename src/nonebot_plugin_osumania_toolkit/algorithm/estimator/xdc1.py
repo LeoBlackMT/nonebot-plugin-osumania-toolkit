@@ -16,7 +16,10 @@ Mixed 路由里它出现在三处（见 ``mixed.py``）：
 from __future__ import annotations
 
 import math
+import bisect
 from typing import Any
+
+import numpy as np
 
 from .rc import numeric_to_rc_label
 from .shared import js_fixed, resolve_chart_path
@@ -35,27 +38,11 @@ def _zeros(size: int) -> list[float]:
 
 
 def _lower_bound(sorted_values: list[float], value: float) -> int:
-    lo = 0
-    hi = len(sorted_values)
-    while lo < hi:
-        mid = (lo + hi) >> 1
-        if sorted_values[mid] < value:
-            lo = mid + 1
-        else:
-            hi = mid
-    return lo
+    return bisect.bisect_left(sorted_values, value)
 
 
 def _upper_bound(sorted_values: list[float], value: float) -> int:
-    lo = 0
-    hi = len(sorted_values)
-    while lo < hi:
-        mid = (lo + hi) >> 1
-        if sorted_values[mid] <= value:
-            lo = mid + 1
-        else:
-            hi = mid
-    return lo
+    return bisect.bisect_right(sorted_values, value)
 
 
 def _hit_window_unit() -> float:
@@ -67,25 +54,21 @@ def _hit_window_unit() -> float:
 def _window_integral(x: list[float], f: list[float], window: float) -> list[float]:
     """分段常数 f 在 [x[i]-window, x[i]+window] 上的积分，裁剪到 x 的范围。"""
     n = len(x)
-    out = _zeros(n)
     if n < 2:
-        return out
-    prefix = _zeros(n)
-    for i in range(1, n):
-        prefix[i] = prefix[i - 1] + f[i - 1] * (x[i] - x[i - 1])
-    ca = 0
-    cb = 0
-    for i in range(n):
-        a = _clamp(x[i] - window, x[0], x[n - 1])
-        b = _clamp(x[i] + window, x[0], x[n - 1])
-        while ca < n and x[ca] < a:
-            ca += 1
-        while cb < n and x[cb] < b:
-            cb += 1
-        ia = ca - 1 if ca else 0
-        ib = cb - 1 if cb else 0
-        out[i] = (prefix[ib] + f[ib] * (b - x[ib])) - (prefix[ia] + f[ia] * (a - x[ia]))
-    return out
+        return [0.0] * n
+    xa = np.asarray(x, dtype=np.float64)
+    fa = np.asarray(f, dtype=np.float64)
+    prefix = np.empty(n, dtype=np.float64)
+    prefix[0] = 0.0
+    np.cumsum(fa[:-1] * (xa[1:] - xa[:-1]), out=prefix[1:])
+    a = np.clip(xa - window, xa[0], xa[-1])
+    b = np.clip(xa + window, xa[0], xa[-1])
+    ca = np.searchsorted(xa, a, side="left")
+    cb = np.searchsorted(xa, b, side="left")
+    ia = np.maximum(ca - 1, 0)
+    ib = np.maximum(cb - 1, 0)
+    out = (prefix[ib] + fa[ib] * (b - xa[ib])) - (prefix[ia] + fa[ia] * (a - xa[ia]))
+    return out.tolist()
 
 
 def _window_sum(
@@ -99,35 +82,34 @@ def _window_sum(
 
 def _window_avg(x: list[float], f: list[float], window: float) -> list[float]:
     n = len(x)
+    if n < 2:
+        return [0.0] * n
     out = _window_integral(x, f, window)
-    ca = 0
-    cb = 0
-    for i in range(n):
-        a = _clamp(x[i] - window, x[0], x[n - 1])
-        b = _clamp(x[i] + window, x[0], x[n - 1])
-        while ca < n and x[ca] < a:
-            ca += 1
-        while cb < n and x[cb] < b:
-            cb += 1
-        span = b - a
-        out[i] = out[i] / span if span > 0.0 else 0.0
-    return out
+    xa = np.asarray(x, dtype=np.float64)
+    a = np.clip(xa - window, xa[0], xa[-1])
+    b = np.clip(xa + window, xa[0], xa[-1])
+    span = b - a
+    oa = np.asarray(out, dtype=np.float64)
+    return np.where(span > 0.0, oa / np.where(span > 0.0, span, 1.0), 0.0).tolist()
 
 
 def _add_span(
     f: list[float], grid: list[float], t0: float, t1: float, val: float
 ) -> None:
     """把 [t0,t1) 上的常数 val 按网格单元时间平均累加，短跨度也能完整计入。"""
-    if len(grid) < 2 or t1 <= t0:
+    n = len(grid)
+    if n < 2 or t1 <= t0:
         return
-    q = _upper_bound(grid, t0)
+    q = bisect.bisect_right(grid, t0)
     if q > 0:
         q -= 1
-    while q + 1 < len(grid) and grid[q] < t1:
-        lo = max(t0, grid[q])
-        hi = min(t1, grid[q + 1])
+    while q + 1 < n and grid[q] < t1:
+        g0 = grid[q]
+        g1 = grid[q + 1]
+        lo = t0 if t0 > g0 else g0
+        hi = t1 if t1 < g1 else g1
         if hi > lo:
-            f[q] += val * (hi - lo) / (grid[q + 1] - grid[q])
+            f[q] += val * (hi - lo) / (g1 - g0)
         q += 1
 
 
@@ -230,7 +212,12 @@ def _tech_sum(grid: list[float], f: list[float]) -> list[float]:
 
 
 def _smoothstep01(u: float) -> float:
-    t = _clamp(u, 0.0, 1.0)
+    if u <= 0.0:
+        t = 0.0
+    elif u >= 1.0:
+        t = 1.0
+    else:
+        t = u
     return t * t * (3.0 - 2.0 * t)
 
 
@@ -373,42 +360,51 @@ def _group_strokes(hand_notes: list[dict[str, Any]]) -> dict[str, list[Any]]:
     return strokes
 
 
-def _note_consistency(note_times: list[float], note_columns: list[int], i: int) -> float:
-    """note i 周围的重复程度：1 减去最佳 lag 的缺失比例，再减去 lag 代价。"""
+def _note_consistency_all(
+    note_times: list[float], note_columns: list[int], gaps: list[float]
+) -> list[float]:
+    """批量版 noteConsistency：对每个 lag p 先做全局前缀和，再按窗口 O(1) 取值。
+
+    与逐音符版本数值等价（仅求和顺序不同），把 O(n·P·W) 的窗口扫描降为 O(n·P)。
+    """
     n = len(note_times)
-    a = i - MANIP_WINDOW if i >= MANIP_WINDOW else 0
-    b = min(n, i + MANIP_WINDOW + 1)
-    best = 0.0
+    best = [0.0] * n
+    cols = note_columns
     for p in range(1, MANIP_PERIOD_MAX + 1):
-        if b < a + p + 4:
+        m = n - p - 1
+        if m <= 0:
             break
-        miss = 0.0
-        count = 0
-        q = a
-        while q + p < b:
-            if q + p + 1 >= b:
-                break
-            if (
-                note_columns[q] != note_columns[q + p]
-                or note_columns[q + 1] != note_columns[q + p + 1]
-            ):
-                miss += 1.0
-                count += 1
-                q += 1
+        prefix_miss = [0.0] * (m + 1)
+        for q in range(m):
+            if cols[q] != cols[q + p] or cols[q + 1] != cols[q + p + 1]:
+                prefix_miss[q + 1] = prefix_miss[q] + 1.0
                 continue
-            g1 = note_times[q + 1] - note_times[q]
-            g2 = note_times[q + p + 1] - note_times[q + p]
+            g1 = gaps[q]
+            g2 = gaps[q + p]
             med = 0.5 * (g1 + g2)
             tol = math.sqrt(
                 MANIP_PACE * med * MANIP_PACE * med
                 + MANIP_PACE_FLOOR_MS * MANIP_PACE_FLOOR_MS
             )
-            miss += _smoothstep01(abs(g1 - g2) / tol)
-            count += 1
-            q += 1
-        if count <= 0:
-            continue
-        best = max(best, 1.0 - miss / count - MANIP_PERIOD_COST * (p - 1))
+            u = abs(g1 - g2) / tol
+            if u < 1.0:
+                prefix_miss[q + 1] = prefix_miss[q] + u * u * (3.0 - 2.0 * u)
+            else:
+                prefix_miss[q + 1] = prefix_miss[q] + 1.0
+        period_cost = MANIP_PERIOD_COST * (p - 1)
+        for i in range(n):
+            a = i - MANIP_WINDOW if i >= MANIP_WINDOW else 0
+            b = min(n, i + MANIP_WINDOW + 1)
+            if b < a + p + 4:
+                continue
+            q_end = b - p - 1
+            if q_end <= a:
+                continue
+            miss = prefix_miss[q_end] - prefix_miss[a]
+            count = q_end - a
+            score = 1.0 - miss / count - period_cost
+            if score > best[i]:
+                best[i] = score
     return best
 
 
@@ -440,12 +436,14 @@ def _stroke_consistency(
 
     note_times = [event["t"] for event in all_events]
     note_columns = [event["c"] for event in all_events]
+    gaps = [note_times[k + 1] - note_times[k] for k in range(len(note_times) - 1)]
+    consistency = _note_consistency_all(note_times, note_columns, gaps)
     per = [
         _zeros(len(hand_notes_by_hand[0])),
         _zeros(len(hand_notes_by_hand[1])),
     ]
     for e, event in enumerate(all_events):
-        per[event["h"]][event["q"]] = _note_consistency(note_times, note_columns, e)
+        per[event["h"]][event["q"]] = consistency[e]
 
     out: list[list[float]] = []
     for h in range(2):
@@ -700,8 +698,16 @@ def _technique_strain(
         able[h] = _zeros(len(grid))
         for i in range(len(grid)):
             out[h][i] = _hand_cost(_finger_mix(jack[i], motion[i]), wrist, i)
-            w = _clamp(wrist["able"][i], 0.0, 1.0)
-            m = _clamp(wrist["manip"][i], 0.0, 1.0)
+            w = wrist["able"][i]
+            if w < 0.0:
+                w = 0.0
+            elif w > 1.0:
+                w = 1.0
+            m = wrist["manip"][i]
+            if m < 0.0:
+                m = 0.0
+            elif m > 1.0:
+                m = 1.0
             able[h][i] = w + (1.0 - w) * m
     return out, able
 
