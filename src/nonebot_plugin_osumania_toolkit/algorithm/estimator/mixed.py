@@ -436,6 +436,7 @@ def _try_run_roxy_fallback(
     sunny_result: dict[str, Any] | None,
     chart: Any = None,
     marathon_correction: dict[str, Any] | None = None,
+    debug_mode: str = "full",
 ) -> dict[str, Any] | None:
     # Roxy 入口吃谱面文本，此分支始终按文本路径自建解析。
     # 注意：不可向 roxy 传共享 chart——roxy 的 canonicalize 会把首音平移到
@@ -454,6 +455,7 @@ def _try_run_roxy_fallback(
             cvt_flag,
             precomputed_sunny_result=sunny_result,
             marathon_correction=marathon_correction,
+            debug_mode=debug_mode,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -661,6 +663,7 @@ def estimate_mixed_result(
     *,
     chart: Any = None,
     marathon_correction: dict[str, Any] | None = None,
+    roxy_debug_mode: str = "full",
 ) -> dict[str, Any]:
     """JS ``runMixedEstimatorFromText`` 直译。
 
@@ -737,6 +740,7 @@ def estimate_mixed_result(
             sunny,
             chart=chart,
             marathon_correction=marathon_correction,
+            debug_mode=roxy_debug_mode,
         )
         if can_use_rc_result(roxy_result):
             selected_result = roxy_result

@@ -3,8 +3,12 @@ import math
 import time
 import shutil
 import asyncio
+import hashlib
+import threading
 from typing import Any
 from pathlib import Path
+from collections import OrderedDict
+from dataclasses import dataclass
 
 from nonebot import get_plugin_config
 
@@ -138,30 +142,67 @@ def _build_marathon_correction(
     return {"durationS": duration_s, "ettValues": ett_values}
 
 
-async def analyze_mapview_chart(
-    chart_file: Path,
-    file_name: str,
+@dataclass(slots=True)
+class MapviewAnalysis:
+    """一次 /mapview 分析所需的全部中间结果（不含展示层格式化）。"""
+
+    meta_data: Any
+    star: float
+    ln_ratio: float
+    column_count: int
+    mixed_result: dict[str, Any] | None
+    mixed_diff_text: str
+    pattern_result: Any
+
+
+# 整条分析链的结果缓存：同一谱面内容 + 同一组参数直接复用，跳过解析/估计/键型。
+# 键使用文件内容哈希（下载/解压出的临时文件每次 mtime 不同，路径还会被清理），
+# 因此重复命令、图包重传、同一张图多次 @ 都能命中。
+_ANALYSIS_CACHE_MAX = 32
+_analysis_cache: OrderedDict[tuple[Any, ...], MapviewAnalysis] = OrderedDict()
+_analysis_cache_lock = threading.Lock()
+
+
+def _analysis_cache_key(
+    path: Path, speed_rate: float, od_flag: Any, cvt_flag: Any
+) -> tuple[Any, ...] | None:
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    # cvt 只关心 IN/HO 是否生效（顺序/大小写不影响结果）。
+    in_enabled, ho_enabled, _ = normalize_cvt_flags(cvt_flag)
+    cvt_key: Any = (in_enabled, ho_enabled)
+    try:
+        rate_key: Any = float(speed_rate)
+    except (TypeError, ValueError):
+        rate_key = speed_rate
+    return (digest, rate_key, str(od_flag), cvt_key)
+
+
+def _analysis_cache_get(key: tuple[Any, ...]) -> MapviewAnalysis | None:
+    with _analysis_cache_lock:
+        cached = _analysis_cache.get(key)
+        if cached is not None:
+            _analysis_cache.move_to_end(key)
+        return cached
+
+
+def _analysis_cache_put(key: tuple[Any, ...], value: MapviewAnalysis) -> None:
+    with _analysis_cache_lock:
+        _analysis_cache[key] = value
+        _analysis_cache.move_to_end(key)
+        while len(_analysis_cache) > _ANALYSIS_CACHE_MAX:
+            _analysis_cache.popitem(last=False)
+
+
+async def _compute_mapview_analysis(
+    target_file: Path,
+    target_name: str,
     speed_rate: float,
     od_flag: str | float | None,
     cvt_flag: list[str],
-    mod_display: str,
-    cache_dir: Path,
-) -> dict[str, Any]:
-    target_file = chart_file
-    target_name = file_name
-
-    if is_mc_file(str(target_file)):
-        try:
-            osu_file_path = await asyncio.to_thread(
-                convert_mc_to_osu,
-                str(target_file),
-                str(cache_dir),
-            )
-            target_file = Path(osu_file_path)
-            target_name = os.path.basename(osu_file_path)
-        except Exception as e:
-            raise ParseError(f".mc 转 .osu 失败: {e}") from e
-
+) -> MapviewAnalysis:
     # 单次解析，各消费者拿 clone。
     try:
         base_chart = await asyncio.to_thread(load_osu_chart, str(target_file))
@@ -198,6 +239,7 @@ async def analyze_mapview_chart(
             sunny_result,
             chart=base_chart.clone(),
             marathon_correction=marathon_correction,
+            roxy_debug_mode="lite",
         )
         mixed_diff_text = str(mixed_result.get("estDiff", sunny_result["estDiff"]))
     except Exception:
@@ -205,12 +247,22 @@ async def analyze_mapview_chart(
 
     if isinstance(mixed_result, dict) and mixed_result.get("mixedCompanellaPlan"):
         try:
+            # 同一张 4K 图的 ETT 只算一次：马拉松修正已经拿到的 MSD 直接喂给
+            # Companella（仅在无 IN/HO 转换时成立——马拉松通道会先应用转换，
+            # Companella 不会）。
+            in_enabled, ho_enabled, _ = normalize_cvt_flags(cvt_flag)
+            reused_msd = (
+                marathon_correction.get("ettValues")
+                if marathon_correction and not in_enabled and not ho_enabled
+                else None
+            )
             companella_result = await asyncio.to_thread(
                 estimate_companella_result,
                 str(target_file),
                 speed_rate,
                 cvt_flag,
                 sunny_result=sunny_result,
+                msd_values=reused_msd,
                 chart=base_chart.clone(),
             )
             mixed_result = apply_companella_to_mixed_result(
@@ -257,7 +309,25 @@ async def analyze_mapview_chart(
     ):
         meta_data = resolve_meta_data(target_file, target_name)
 
-    merged_clusters = _merge_duplicate_clusters(pattern_result.report.Clusters)
+    return MapviewAnalysis(
+        meta_data=meta_data,
+        star=sr,
+        ln_ratio=ln_ratio,
+        column_count=column_count,
+        mixed_result=mixed_result,
+        mixed_diff_text=mixed_diff_text,
+        pattern_result=pattern_result,
+    )
+
+
+def _build_mapview_template(
+    analysis: MapviewAnalysis,
+    file_name: str,
+    speed_rate: float,
+    od_flag: str | float | None,
+    mod_display: str,
+) -> dict[str, Any]:
+    merged_clusters = _merge_duplicate_clusters(analysis.pattern_result.report.Clusters)
     top_five = merged_clusters[:5]
     while len(top_five) < 5:
         top_five.append({"label": "-", "amount": 0.0, "subtype": "-"})
@@ -286,14 +356,15 @@ async def analyze_mapview_chart(
     if extra_parts:
         mod_line += f" ({', '.join(extra_parts)})"
 
-    diff_top, diff_bottom = _split_diff_lines(mixed_diff_text)
+    diff_top, diff_bottom = _split_diff_lines(analysis.mixed_diff_text)
 
     # 显示层对齐 JS 插件（analysis.js 用 pipelineResult.rework.* = Mixed 的
     # 选中估计器结果）：star/LN%/Keys 以 Mixed 输出为准，Mixed 缺失或 NaN 时
     # 回退 Sunny 基线值。
-    display_sr = sr
-    display_ln = ln_ratio
-    display_cc = column_count
+    display_sr = analysis.star
+    display_ln = analysis.ln_ratio
+    display_cc = analysis.column_count
+    mixed_result = analysis.mixed_result
     if isinstance(mixed_result, dict):
         m_star = mixed_result.get("star")
         m_ln = mixed_result.get("lnRatio")
@@ -322,23 +393,62 @@ async def analyze_mapview_chart(
     star_text = color._pick_readable_text_color(display_sr, star_bg, star_text_pref)
 
     return {
+        "status_text": _render_meta_title(analysis.meta_data),
+        "mode_tag": analysis.pattern_result.report.ModeTag,
+        "mode_tag_class": color._mode_tag_class(analysis.pattern_result.report.ModeTag),
+        "rework_star": f"{display_sr:.2f}",
+        "star_bg_color": star_bg,
+        "star_text_color": star_text,
+        "rework_meta_lines": [
+            f"LN%: {display_ln:.2%}",
+            f"Keys: {display_cc}K",
+            f"Mods: {mod_line}",
+        ],
+        "rework_diff_top": diff_top,
+        "rework_diff_bottom": diff_bottom,
+        "clusters": cluster_rows,
+    }
+
+
+async def analyze_mapview_chart(
+    chart_file: Path,
+    file_name: str,
+    speed_rate: float,
+    od_flag: str | float | None,
+    cvt_flag: list[str],
+    mod_display: str,
+    cache_dir: Path,
+) -> dict[str, Any]:
+    """`/mapview` 单张谱面的统一入口：分析结果缓存 + 展示层模板一次产出。"""
+    target_file = chart_file
+    target_name = file_name
+
+    if is_mc_file(str(target_file)):
+        try:
+            osu_file_path = await asyncio.to_thread(
+                convert_mc_to_osu,
+                str(target_file),
+                str(cache_dir),
+            )
+            target_file = Path(osu_file_path)
+            target_name = os.path.basename(osu_file_path)
+        except Exception as e:
+            raise ParseError(f".mc 转 .osu 失败: {e}") from e
+
+    cache_key = _analysis_cache_key(target_file, speed_rate, od_flag, cvt_flag)
+    analysis = _analysis_cache_get(cache_key) if cache_key is not None else None
+    if analysis is None:
+        analysis = await _compute_mapview_analysis(
+            target_file, target_name, speed_rate, od_flag, cvt_flag
+        )
+        if cache_key is not None:
+            _analysis_cache_put(cache_key, analysis)
+
+    return {
         "file_name": target_name,
-        "template": {
-            "status_text": _render_meta_title(meta_data),
-            "mode_tag": pattern_result.report.ModeTag,
-            "mode_tag_class": color._mode_tag_class(pattern_result.report.ModeTag),
-            "rework_star": f"{display_sr:.2f}",
-            "star_bg_color": star_bg,
-            "star_text_color": star_text,
-            "rework_meta_lines": [
-                f"LN%: {display_ln:.2%}",
-                f"Keys: {display_cc}K",
-                f"Mods: {mod_line}",
-            ],
-            "rework_diff_top": diff_top,
-            "rework_diff_bottom": diff_bottom,
-            "clusters": cluster_rows,
-        },
+        "template": _build_mapview_template(
+            analysis, target_name, speed_rate, od_flag, mod_display
+        ),
     }
 
 

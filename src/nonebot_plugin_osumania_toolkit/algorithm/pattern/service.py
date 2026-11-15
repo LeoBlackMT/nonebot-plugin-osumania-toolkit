@@ -12,7 +12,7 @@ from .summary import PatternReport, from_chart
 
 # 键型分析结果 memo（路径 + mtime + 大小为键；rate 在分析中被忽略，不入键）。
 # 同文件重复命令直接命中，避免重复解析与聚类计算。
-_PATTERN_CACHE_MAX = 16
+_PATTERN_CACHE_MAX = 64
 _pattern_cache: OrderedDict[tuple[str, int, int], PatternAnalysisResult] = OrderedDict()
 _pattern_cache_lock = threading.Lock()
 

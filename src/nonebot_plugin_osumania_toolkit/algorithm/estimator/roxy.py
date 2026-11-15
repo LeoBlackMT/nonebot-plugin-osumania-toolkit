@@ -199,10 +199,10 @@ def _safe_div(a: float, b: float, fallback: float = 0.0) -> float:
 
 def _to_float(value: Any) -> float:
     """近似 JS ``Number(value)``: 数值原样, 字符串走 :func:`_js_number`, 其余 NaN。"""
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
+    if isinstance(value, float):
+        return value
+    if isinstance(value, int):
+        return 1.0 if isinstance(value, bool) else float(value)
     if isinstance(value, str):
         return _js_number(value)
     return math.nan
@@ -1809,6 +1809,7 @@ def run_roxy_estimator_from_text(
     precomputed_sunny_result: dict[str, Any] | None = None,
     chart: Any = None,
     marathon_correction: dict[str, Any] | None = None,
+    debug_mode: str = "full",
 ) -> dict[str, Any]:
     """JS ``runRoxyEstimatorFromText`` 直译。
 
@@ -2002,16 +2003,22 @@ def run_roxy_estimator_from_text(
 
             est_diff = _numeric_to_roxy_rc_label(final_numeric)
 
-            return {
-                "star": js_fixed(3.4 + 0.38 * final_numeric, 4),
-                "lnRatio": ln_ratio,
-                "columnCount": column_count,
-                "estDiff": est_diff,
-                "numericDifficulty": final_numeric,
-                "numericDifficultyHint": "roxy-meta-ridge-v3",
-                "graph": None,
-                "rawNumericDifficulty": js_fixed(numeric_details["rawNumeric"], 4),
-                "debug": {
+            if debug_mode == "lite":
+                # Mixed 的路由判定只消费 finalNumeric / handBias / anchorRate /
+                # references.Azusa；完整 debug 要为 111 维 meta 特征、7 条流与
+                # 16 项统计逐个 toFixed(4)，实测约占 Roxy 总耗时 27%。
+                debug_payload = {
+                    "finalNumeric": _fmt4(final_numeric),
+                    "stats": {
+                        "handBias": _fmt4(curve["stats"].get("handBias")),
+                        "anchorRate": _fmt4(curve["stats"].get("anchorRate")),
+                    },
+                    "meta": {
+                        "references": {"Azusa": _fmt4(meta_predictions.get("Azusa"))}
+                    },
+                }
+            else:
+                debug_payload = {
                     "notes": len(taps),
                     "rows": len(rows),
                     "rawAgg": _fmt4(numeric_details["rawAgg"]),
@@ -2074,7 +2081,18 @@ def run_roxy_estimator_from_text(
                         }
                         for name, summary in curve["streamSummaries"].items()
                     },
-                },
+                }
+
+            return {
+                "star": js_fixed(3.4 + 0.38 * final_numeric, 4),
+                "lnRatio": ln_ratio,
+                "columnCount": column_count,
+                "estDiff": est_diff,
+                "numericDifficulty": final_numeric,
+                "numericDifficultyHint": "roxy-meta-ridge-v3",
+                "graph": None,
+                "rawNumericDifficulty": js_fixed(numeric_details["rawNumeric"], 4),
+                "debug": debug_payload,
             }
         finally:
             try:

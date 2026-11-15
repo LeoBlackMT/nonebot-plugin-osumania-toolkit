@@ -13,7 +13,7 @@ from .exceptions import NotManiaError, ParseError
 
 # interlude 星数 memo（路径 + mtime + 大小 + rate + cvt 为键）：
 # companella 每次都会重算，同文件同参数重复调用直接命中。
-_INTERLUDE_CACHE_MAX = 16
+_INTERLUDE_CACHE_MAX = 64
 _interlude_cache: OrderedDict[tuple[Any, ...], float] = OrderedDict()
 _interlude_cache_lock = threading.Lock()
 

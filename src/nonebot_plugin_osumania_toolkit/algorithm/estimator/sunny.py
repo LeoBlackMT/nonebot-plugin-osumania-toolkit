@@ -11,7 +11,7 @@ from .shared import resolve_chart_path
 
 # 同一谱面（路径 + mtime + 大小）在同一组参数下的 sunny 结果 memo：
 # mapview/mixed/daniel 兜底等场景存在同参数重复计算，缓存后直接复用。
-_SUNNY_CACHE_MAX = 32
+_SUNNY_CACHE_MAX = 128
 _sunny_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
 _sunny_cache_lock = threading.Lock()
 
