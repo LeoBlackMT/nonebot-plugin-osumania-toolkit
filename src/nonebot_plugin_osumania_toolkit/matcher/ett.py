@@ -37,7 +37,9 @@ ett = on_command("ett", aliases={"msd"}, block=True)
 @ett.handle()
 async def handle_ett(bot: Bot, event: Event):
     cmd_text = event.get_plaintext().strip()
-    speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg = parse_cmd(cmd_text)
+    speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg, _range_text = parse_cmd(
+        cmd_text
+    )
 
     if mod_display != "NM" or cvt_flag or od_flag is not None:
         err_msg.append("/ett 不支持 mods、OD 覆写和 IN/HO，仅支持 rate（如 x1.4）")

@@ -19,6 +19,7 @@ from ..api.download import download_file
 from ..api.osu import download_file_by_id
 from ..file.cleanup import cleanup_temp_file
 from ..algorithm.utils import parse_bid_or_url, parse_cmd, is_mc_file
+from ..algorithm.pause import format_pause_line
 from ..algorithm.detector import run_analyze_cheating, format_analyze_result
 from ..algorithm.conversion import convert_mr_to_osr, convert_mc_to_osu
 from .. import platform
@@ -34,7 +35,9 @@ async def handle_first(bot: Bot, event: Event, state: T_State):
 
     cmd_text = event.get_plaintext().strip()
     state["show_reason"] = "-reason" in cmd_text.lower()
-    _speed_rate, _od_flag, _cvt_flag, bid, _mod_display, cmd_err_msg = parse_cmd(cmd_text)
+    _speed_rate, _od_flag, _cvt_flag, bid, _mod_display, cmd_err_msg, _range_text = (
+        parse_cmd(cmd_text)
+    )
     if cmd_err_msg:
         state["status"] = "Fail"
         await analyze.finish("错误:\n" + "\n".join(cmd_err_msg) + "\n请检查命令格式并重试。")
@@ -115,7 +118,13 @@ async def handle_first(bot: Bot, event: Event, state: T_State):
             result = await run_analyze_cheating(osr, osu)
             state["status"] = "Finish"
             await platform.send_image(bot, analyze, Path(output_path).read_bytes())
-            await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
+            await analyze.finish(
+                format_analyze_result(
+                    result,
+                    state.get("show_reason", False),
+                    format_pause_line(osr, osu),
+                )
+            )
         except FinishedException:
             pass    
         except Exception as e:
@@ -171,7 +180,13 @@ async def handle_file(bot: Bot, event: Event, state: T_State, user_msg: Message 
                 output_path = await run_plot_comprehensive(str(CACHE_DIR), osr)
                 result = await run_analyze_cheating(osr)
                 await platform.send_image(bot, analyze, Path(output_path).read_bytes())
-                await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
+                await analyze.finish(
+                    format_analyze_result(
+                        result,
+                        state.get("show_reason", False),
+                        format_pause_line(osr),
+                    )
+                )
             except FinishedException:
                 pass
             except Exception as e:
@@ -210,7 +225,13 @@ async def handle_file(bot: Bot, event: Event, state: T_State, user_msg: Message 
                 output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
                 result = await run_analyze_cheating(osr, osu)
                 await platform.send_image(bot, analyze, Path(output_path).read_bytes())
-                await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
+                await analyze.finish(
+                    format_analyze_result(
+                        result,
+                        state.get("show_reason", False),
+                        format_pause_line(osr, osu),
+                    )
+                )
             except FinishedException:
                 pass
             except Exception as e:
@@ -267,7 +288,13 @@ async def handle_file(bot: Bot, event: Event, state: T_State, user_msg: Message 
             output_path = await run_plot_comprehensive(str(CACHE_DIR), osr, osu)
             result = await run_analyze_cheating(osr, osu)
             await platform.send_image(bot, analyze, Path(output_path).read_bytes())
-            await analyze.finish(format_analyze_result(result, state.get("show_reason", False)))
+            await analyze.finish(
+                format_analyze_result(
+                    result,
+                    state.get("show_reason", False),
+                    format_pause_line(osr, osu),
+                )
+            )
         except FinishedException:
             pass
         except Exception as e:

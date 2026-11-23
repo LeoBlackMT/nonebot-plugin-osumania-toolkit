@@ -23,7 +23,9 @@ class omtk_help_data:
         "10. /acc 或 /单曲 - 单曲ACC计算\n"
         "11. /ett 或 /msd - 计算谱面MSD\n"
         "12. /cvtscore 或 /转换 - 按目标规则重算回放成绩\n"
-        "13. /omtk report - 反馈问题"
+        "13. /laneacc 或 /分轨 - 回放分轨准确度与左右手统计\n"
+        "14. /pause 或 /pc - 回放暂停统计\n"
+        "15. /omtk report - 反馈问题"
     )
     # help_text 结构：(命令, 命令名称, 页码, 总页码, 帮助文本)
     help_text = [("rework", "星数重算", "1", "1",
@@ -72,7 +74,7 @@ class omtk_help_data:
             f"你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来分析键型和估计难度。本命令别名/rework。\n命令格式：/mapview b<bid> +[mods] x[speed] OD[OD] \n示例：/mapview b4094064 +EZHO x1.25\n/mapview b4094064 +IN OD8\n警告：图包分析开销较大，请勿滥用。限制：单文件大小 {config.max_file_size_mb if config.max_file_size_mb > 0 else '无限制'} MB; 处理上限 {config.batch_max_charts if config.batch_max_charts > 0 else '无限制'} 个。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 部分模组和参数冲突。"),
             
             ("mapview", "键型分析与难度估计", "2", "2",
-            "/mapview 参数说明：\n- bid: 以 b 开头，后跟整数，从官网获取谱面。或输入网址。\n- mods: 以 + 开头，后跟模组名缩写（支持 HR/EZ、DT/HT、IN/HO、DC/NC）。不区分大小写，格式同雨沐机器人。\n- speed: 以 x 或 * 或 × 开头，后跟倍速数值（如 x1.5）。倍速必须在 0.25 到 3.0 之间。\n- OD: 以 OD 开头, OD值必须在 -15 到 15 之间。"),
+            "/mapview 参数说明：\n- bid: 以 b 开头，后跟整数，从官网获取谱面。或输入网址。\n- mods: 以 + 开头，后跟模组名缩写（支持 HR/EZ、DT/HT、IN/HO、DC/NC）。不区分大小写，格式同雨沐机器人。\n- speed: 以 x 或 * 或 × 开头，后跟倍速数值（如 x1.5）。倍速必须在 0.25 到 3.0 之间。\n- OD: 以 OD 开头, OD值必须在 -15 到 15 之间。\n- range: 以 -range 开头，后跟播放时间区间（如 -range 1:30-2:10），仅支持单谱面，不支持图包。"),
             
             ("ett", "Etterna难度计算", "1", "1",
              f"你可以回复包含 .osu/.mc 文件的消息，或回复包含 .osz/.mcz 的消息，或使用 bid/网址 指定谱面来计算谱面MSD。\n命令格式：/ett b<bid> x[speed]\n示例：/ett b4094064 x1.25\n警告：图包分析开销较大，请勿滥用。限制：单文件大小 {config.max_file_size_mb if config.max_file_size_mb > 0 else '无限制'} MB; 处理上限 {config.batch_max_charts if config.batch_max_charts > 0 else '无限制'} 个。\n注意：1. 如果你回复了一个包含谱面/图包文件的消息，命令将忽略bid。\n2. 该命令仅支持 rate（如 x1.5），不支持 mods、OD 覆写和 IN/HO。\n3. 计算结果仅供参考，MSD在不同版本下因算法差异可能不同，本插件使用0.74.0 MinaClac。\n4. 命令别名 /msd"),
@@ -103,6 +105,12 @@ class omtk_help_data:
             ("cvtscore", "成绩转换", "3", "3",
              "全部可用模板和 ruleset：\n" + _build_cvtscore_ruleset_listing_text()),
             
+            ("laneacc", "分轨准确度", "1", "1",
+             "你可以使用 /laneacc (/分轨) 分析回放的每轨准确度与左右手统计。\n用法：回复 .osr/.mr 回放，同时用 b<bid> 指定谱面；未指定时会提示发送 .osu/.mc。\n命令格式：/laneacc b<bid> [-mode stbv1|stbv2|lzr|lazer]\n示例：/laneacc b4094064\n说明：\n1. 4K–10K 输出完整卡片；11K–18K 输出文本摘要。\n2. 奇数键中列不显示、不计入 L/R；Overall 仍包含全部轨道。\n3. Stable V1 权重 300、Stable V2/Lazer 权重 305；Malody .mr 使用 100/75/40/0。\n4. Lazer 回放与 .mr 分轨为帧重建，结果标注为近似/实验性。"),
+
+            ("pause", "暂停统计", "1", "1",
+             "你可以使用 /pause (/pc) 查看回放中的暂停次数和位置。\n用法：回复 .osr 回放即可，不需要谱面。\n说明：\n1. 仅 Lazer .osr 的 scoreInfo 含 pauses；stable .osr 不记录暂停。\n2. .mr 不包含暂停数据。\n3. 暂停位置按播放时间显示；/analyze 会在结论后自动追加同一行。"),
+
             ("report", "反馈问题", "1", "1",
              "如果你在使用过程中遇到任何问题、错误或有任何建议，欢迎提交GitHub Issues来反馈给开发者：\nhttps://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/issues/new")
             ]
@@ -117,4 +125,7 @@ class omtk_help_data:
         "投皮": "percy",
         "单曲": "acc",
         "转换": "cvtscore",
+        "分轨": "laneacc",
+        "暂停": "pause",
+        "pc": "pause",
         }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import lzma
 import struct
 import numpy as np
@@ -348,6 +349,11 @@ class osr_file:
         self.replay_hash = ""
         self.replay_id = 0
         self.extra_mod_data = None
+        self.score_info: dict | None = None
+        self.pauses: list[int] = []
+        self.pause_available = False
+        self.pause_count = 0
+        self.score_info_speed_rate: float | None = None
         self.compressed_data = b""
 
         self.number_300s = 0
@@ -397,10 +403,77 @@ class osr_file:
                 self.replay_id = 0
 
             self.extra_mod_data = None
+            self._read_score_info(reader)
         except Exception as exc:
             self.status = "ParseError"
             self.error_message = f"头部解析失败: {exc}"
             logger.error(f"解析 .osr 文件头失败: {exc}")
+
+    def _read_score_info(self, reader: _BinaryReader) -> None:
+        """读取 Lazer `.osr` 尾部的 scoreInfo（pauses / mods 倍速）。"""
+        if self.game_version < 30_000_000 or reader.remaining < 4:
+            return
+        try:
+            info_length = reader.read_int32()
+            if info_length <= 0 or info_length > 1_048_576:
+                return
+            blob = reader.read_bytes(info_length)
+            try:
+                raw = lzma.decompress(blob, format=lzma.FORMAT_ALONE)
+            except lzma.LZMAError:
+                raw = lzma.decompress(blob)
+            if len(raw) > 8 * 1024 * 1024:
+                return
+            info = json.loads(raw.decode("utf-8"))
+            if not isinstance(info, dict):
+                return
+            self.score_info = info
+            self.extra_mod_data = info
+            pauses = info.get("pauses")
+            if isinstance(pauses, list):
+                self.pauses = [
+                    int(value)
+                    for value in pauses
+                    if isinstance(value, (int, float)) and int(value) == value
+                ]
+                self.pause_available = True
+                self.pause_count = len(self.pauses)
+            elif isinstance(info.get("pause_count"), int):
+                self.pause_count = max(0, int(info["pause_count"]))
+            self.score_info_speed_rate = self._speed_rate_from_score_info(info)
+        except Exception as exc:  # noqa: BLE001 - 旧版/损坏的 scoreInfo 不影响回放解析
+            logger.debug(f"读取 .osr scoreInfo 失败: {exc}")
+
+    @staticmethod
+    def _speed_rate_from_score_info(info: dict) -> float | None:
+        mods = info.get("mods")
+        if not isinstance(mods, list):
+            return None
+        rate = 1.0
+        found = False
+        for entry in mods:
+            if not isinstance(entry, dict):
+                continue
+            acronym = str(entry.get("acronym", "")).upper()
+            default: float | None = None
+            if acronym in {"DT", "NC"}:
+                default = 1.5
+            elif acronym in {"HT", "DC"}:
+                default = 0.75
+            if default is None:
+                continue
+            found = True
+            settings = entry.get("settings")
+            candidate = (
+                settings.get("speed_change") if isinstance(settings, dict) else None
+            )
+            try:
+                value = float(candidate)
+            except (TypeError, ValueError):
+                value = default
+            if value > 0:
+                rate = value
+        return rate if found else 1.0
 
     def _ticks_to_datetime(self, ticks: int) -> datetime.datetime:
         try:
@@ -850,6 +923,10 @@ class osr_file:
             "intervals": self.intervals,
             "intervals_raw": self.intervals_raw,
             "life_bar_graph": self.life_bar_graph,
+            "pauses": self.pauses,
+            "pause_available": self.pause_available,
+            "pause_count": self.pause_count,
+            "score_info_speed_rate": self.score_info_speed_rate,
             "sample_rate": self.sample_rate,
             "timestamp": self.timestamp,
             "file_path": self.file_path,
@@ -890,6 +967,7 @@ class osr_file:
             "accuracy": round(float(self.acc), 4),
             "sample_rate": self.sample_rate,
             "press_count": len(self.press_events),
+            "pause_count": self.pause_count,
         }
 
     def _perform_fft_analysis(self, durations: list[int]) -> dict:

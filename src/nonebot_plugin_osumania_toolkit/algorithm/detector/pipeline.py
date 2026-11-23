@@ -100,28 +100,36 @@ def analyze_cheating(osr: osr_file, osu: osu_file | None = None) -> dict:
         "signals": signals,
     }
 
-def format_analyze_result(result: dict[str, Any], show_reason: bool) -> str:
+def format_analyze_result(
+    result: dict[str, Any],
+    show_reason: bool,
+    pause_line: str | None = None,
+) -> str:
     """Format the cheating analysis result into a user-facing message."""
     reason_str = "\n".join(result["reasons"]) if result.get("reasons") else "无分析结果。"
     cheat = bool(result.get("cheat"))
     sus = bool(result.get("sus"))
 
     if cheat:
-        return (
+        text = (
             f"<!>此成绩检测到作弊：\n{reason_str}\n"
             "仅供参考，请结合其他信息进行判断。"
         )
-    if sus and show_reason:
-        return (
+    elif sus and show_reason:
+        text = (
             f"<*>此成绩检测到可疑：\n{reason_str}\n"
             "仅供参考，请结合其他信息进行判断。"
         )
-    if show_reason:
-        return (
+    elif show_reason:
+        text = (
             f"分析完成:\n{reason_str}\n"
             "仅供参考，请结合其他信息进行判断。"
         )
-    return "分析完成。仅供参考，请结合其他信息进行判断。"
+    else:
+        text = "分析完成。仅供参考，请结合其他信息进行判断。"
+    if pause_line:
+        text = f"{text}\n{pause_line}"
+    return text
 
 
 async def run_analyze_cheating(osr_obj: osr_file, osu_obj: osu_file | None = None) -> dict:
