@@ -106,10 +106,10 @@ class omtk_help_data:
              "全部可用模板和 ruleset：\n" + _build_cvtscore_ruleset_listing_text()),
             
             ("laneacc", "分轨准确度", "1", "1",
-             "你可以使用 /laneacc (/分轨) 分析回放的每轨准确度与左右手统计。\n用法：回复 .osr/.mr 回放，同时用 b<bid> 指定谱面；未指定时会提示发送 .osu/.mc。\n命令格式：/laneacc b<bid> [-mode stbv1|stbv2|lzr|lazer]\n示例：/laneacc b4094064\n说明：\n1. 4K–10K 输出完整卡片；11K–18K 输出文本摘要。\n2. 奇数键中列不显示、不计入 L/R；Overall 仍包含全部轨道。\n3. Stable V1 权重 300、Stable V2/Lazer 权重 305；Malody .mr 使用 100/75/40/0。\n4. Lazer 回放与 .mr 分轨为帧重建，结果标注为近似/实验性。"),
+             "你可以使用 /laneacc (/分轨) 分析回放的每轨准确度与左右手统计。\n用法：回复 .osr/.mr 回放，同时用 b<bid> 指定谱面；未指定时会提示发送 .osu/.mc。\n命令格式：/laneacc b<bid> [-mode stbv1|stbv2|lzr|lazer]\n说明：\n1. 4K–10K 输出完整卡片；11K–18K 输出文本摘要。\n2. 奇数键中列不显示、不计入 L/R。\n3. Lazer 回放与 .mr 分轨为帧重建，结果标注为近似/实验性。"),
 
             ("pause", "暂停统计", "1", "1",
-             "你可以使用 /pause (/pc) 查看回放中的暂停次数和位置。\n用法：回复 .osr 回放即可，不需要谱面。\n说明：\n1. 仅 Lazer .osr 的 scoreInfo 含 pauses；stable .osr 不记录暂停。\n2. .mr 不包含暂停数据。\n3. 暂停位置按播放时间显示；/analyze 会在结论后自动追加同一行。"),
+             "你可以使用 /pause (/pc) 查看回放中的暂停次数和位置。\n用法：回复 .osr 回放即可，不需要谱面。\n说明：\n1. 仅 2025.816.0 版本之后的原生 Lazer 回放记录暂停，stable .osr 不记录暂停。\n2. .mr 不包含暂停数据。\n3. 暂停位置按播放时间显示。"),
 
             ("report", "反馈问题", "1", "1",
              "如果你在使用过程中遇到任何问题、错误或有任何建议，欢迎提交GitHub Issues来反馈给开发者：\nhttps://github.com/LeoBlackMT/nonebot-plugin-osumania-toolkit/issues/new")
