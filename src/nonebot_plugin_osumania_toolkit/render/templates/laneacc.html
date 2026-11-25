@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>LaneAcc</title>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --text-primary: #f5f7ff;
+            --text-soft: #a9b1d2;
+            --glass: #151b2f;
+            --glass-border: #2a3456;
+            --track: #2a3557;
+            --accent: #4ec7ff;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            color: var(--text-primary);
+            font-family: "Outfit Thin", "Outfit", "Segoe UI", "DejaVu Sans", "Arial", sans-serif;
+            background: #0f1424;
+        }
+
+        body {
+            padding: 0;
+        }
+
+        .dashboard {
+            width: 475px;
+            min-width: 475px;
+            max-width: 475px;
+            margin: 0;
+        }
+
+        .card {
+            position: relative;
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            background: var(--glass);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+            padding: 12px;
+            overflow: hidden;
+            display: grid;
+            gap: 8px;
+        }
+
+        .status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .status {
+            display: block;
+            font-size: 14px;
+            color: var(--text-soft);
+            flex: 1 1 0;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mode-tag {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 22px;
+            padding: 0 9px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border: 1px solid rgba(94, 170, 255, 0.5);
+            color: #d8ecff;
+            background: rgba(94, 170, 255, 0.24);
+            flex: 0 0 auto;
+        }
+
+        .meta {
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--text-soft);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .overall-block {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            align-items: end;
+            padding: 6px 0 2px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .overall-label {
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #bfc8e7;
+        }
+
+        .overall-acc {
+            font-family: "Space Grotesk Light", "Space Grotesk", "Segoe UI", "DejaVu Sans", "Arial", sans-serif;
+            font-size: 38px;
+            font-weight: 800;
+            line-height: 1.05;
+            color: #f6fbff;
+        }
+
+        .overall-counts {
+            text-align: right;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-soft);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .hands {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .hand-card {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 7px 9px;
+            background: rgba(255, 255, 255, 0.035);
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 6px;
+        }
+
+        .hand-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #bfc8e7;
+        }
+
+        .hand-acc {
+            font-size: 20px;
+            font-weight: 700;
+            color: #e9efff;
+        }
+
+        .hand-sub {
+            font-size: 10px;
+            color: var(--text-soft);
+            white-space: nowrap;
+        }
+
+        .lanes {
+            display: grid;
+            gap: 6px;
+        }
+
+        .lane-row {
+            display: grid;
+            grid-template-columns: 34px 1fr 66px;
+            grid-template-rows: auto auto;
+            align-items: center;
+            column-gap: 8px;
+            row-gap: 2px;
+            min-height: 34px;
+        }
+
+        .lane-name {
+            font-size: 12px;
+            font-weight: 700;
+            color: #bfc8e7;
+        }
+
+        .lane-main {
+            min-width: 0;
+        }
+
+        .lane-track {
+            width: 100%;
+            height: 8px;
+            border-radius: 999px;
+            background: var(--track);
+            overflow: hidden;
+        }
+
+        .lane-fill {
+            height: 100%;
+            width: var(--bar-width, 0%);
+            border-radius: 0 999px 999px 0;
+            background: linear-gradient(90deg, #4ec7ff 0%, #58f0d9 60%, #f6ef6b 100%);
+        }
+
+        .lane-counts {
+            grid-column: 2 / 4;
+            font-size: 10px;
+            line-height: 1.2;
+            color: var(--text-soft);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .lane-acc {
+            text-align: right;
+            font-size: 13px;
+            font-weight: 700;
+            color: #e9efff;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .lane-row.is-dim {
+            opacity: 0.55;
+        }
+
+        .footer {
+            display: grid;
+            gap: 2px;
+            padding-top: 2px;
+            font-size: 10px;
+            line-height: 1.3;
+            color: #bfc8e7;
+            opacity: 0.9;
+        }
+
+        .warning {
+            color: #ffd7a8;
+        }
+    </style>
+</head>
+
+<body>
+    <main class="dashboard">
+        <section class="card" style="height: {{ card_height }}px;">
+            <div class="status-row">
+                <p class="status">{{ display_name }}</p>
+                <span class="mode-tag">{{ mode_label }}</span>
+            </div>
+            <div class="meta">{{ meta_line }}</div>
+
+            <div class="overall-block">
+                <div>
+                    <div class="overall-label">Overall (all lanes)</div>
+                    <div class="overall-acc">{{ overall_acc }}</div>
+                </div>
+                <div class="overall-counts">
+                    judged {{ overall_judged }} · miss {{ overall_miss }}<br />
+                    {{ overall_counts }}
+                </div>
+            </div>
+
+            <div class="hands">
+                {% for hand in hands %}
+                <div class="hand-card">
+                    <div>
+                        <div class="hand-label">{{ hand.label }}</div>
+                        <div class="hand-sub">judged {{ hand.judged }} · miss {{ hand.miss }}</div>
+                    </div>
+                    <div class="hand-acc">{{ hand.acc }}</div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="lanes">
+                {% for lane in lanes %}
+                <div class="lane-row{% if lane.dim %} is-dim{% endif %}">
+                    <div class="lane-name">L{{ lane.index }}</div>
+                    <div class="lane-main">
+                        <div class="lane-track">
+                            <div class="lane-fill" style="--bar-width: {{ lane.bar_width }};"></div>
+                        </div>
+                    </div>
+                    <div class="lane-acc">{{ lane.acc }}</div>
+                    <div class="lane-counts">{{ lane.counts_text }}</div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="footer">
+                {% if warning %}<div class="warning">{{ warning }}</div>{% endif %}
+                <div>{{ footer_note }}</div>
+                <div>Generated by nonebot_plugin_osumania_toolkit</div>
+            </div>
+        </section>
+    </main>
+</body>
+
+</html>

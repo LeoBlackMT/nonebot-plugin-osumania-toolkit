@@ -9,8 +9,10 @@ from .acc import acc
 from .percy import percy
 from .pattern import pattern
 from .mapview import mapview
+from .laneacc import laneacc
 from .ett import ett
 from .cvtscore import cvtscore
+from .pause import pause
 
 __all__ = [
     "pressingtime",
@@ -24,6 +26,8 @@ __all__ = [
     "percy",
     "pattern",
     "mapview",
+    "laneacc",
     "ett",
     "cvtscore",
+    "pause",
 ]

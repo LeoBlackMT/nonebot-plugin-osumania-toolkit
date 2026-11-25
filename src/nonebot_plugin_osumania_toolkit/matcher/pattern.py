@@ -231,7 +231,7 @@ async def _analyze_zip_file(
 async def handle_pattern(bot: Bot, event: Event):
     cmd_text = event.get_plaintext().strip()
     detail_mode = _is_detail_mode(cmd_text)
-    _, _, _, bid, _, _ = parse_cmd(cmd_text)
+    _, _, _, bid, _, _, _ = parse_cmd(cmd_text)
 
     tmp_file: Path | None = None
     chart_file: Path | None = None

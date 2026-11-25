@@ -1,6 +1,7 @@
 import os
 import math
 import time
+import uuid
 import shutil
 import asyncio
 import hashlib
@@ -15,6 +16,7 @@ from nonebot import get_plugin_config
 from ..config import Config
 from ..data.color import sr_color
 from .conversion import convert_mc_to_osu
+from .section import SectionSpec, slice_osu_text_by_time_range
 from .rework.rework import get_rework_result
 from .estimator.sunny import build_sunny_result
 from .estimator.exceptions import ParseError, NotManiaError
@@ -320,12 +322,23 @@ async def _compute_mapview_analysis(
     )
 
 
+def _format_playback_ms(value: int) -> str:
+    total_seconds = max(0, int(round(int(value) / 1000.0)))
+    minutes, seconds = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def _build_mapview_template(
     analysis: MapviewAnalysis,
     file_name: str,
     speed_rate: float,
     od_flag: str | float | None,
     mod_display: str,
+    section: SectionSpec | None = None,
+    section_object_count: int = 0,
 ) -> dict[str, Any]:
     merged_clusters = _merge_duplicate_clusters(analysis.pattern_result.report.Clusters)
     top_five = merged_clusters[:5]
@@ -407,6 +420,21 @@ def _build_mapview_template(
         "rework_diff_top": diff_top,
         "rework_diff_bottom": diff_bottom,
         "clusters": cluster_rows,
+        "section_label": (
+            f"{_format_playback_ms(section.start_playback_ms)}–"
+            f"{_format_playback_ms(section.end_playback_ms)}"
+            if section is not None
+            else None
+        ),
+        "section_note": (
+            (
+                f"{section.duration_playback_ms / 1000.0:.1f}s · "
+                f"{section_object_count} objects"
+                + (f" · x{section.rate:g}" if section.rate != 1.0 else "")
+            )
+            if section is not None
+            else None
+        ),
     }
 
 
@@ -418,38 +446,71 @@ async def analyze_mapview_chart(
     cvt_flag: list[str],
     mod_display: str,
     cache_dir: Path,
+    section: SectionSpec | None = None,
 ) -> dict[str, Any]:
     """`/mapview` 单张谱面的统一入口：分析结果缓存 + 展示层模板一次产出。"""
     target_file = chart_file
     target_name = file_name
+    section_file: Path | None = None
+    section_object_count = 0
 
-    if is_mc_file(str(target_file)):
-        try:
-            osu_file_path = await asyncio.to_thread(
-                convert_mc_to_osu,
-                str(target_file),
-                str(cache_dir),
+    try:
+        if is_mc_file(str(target_file)):
+            try:
+                osu_file_path = await asyncio.to_thread(
+                    convert_mc_to_osu,
+                    str(target_file),
+                    str(cache_dir),
+                )
+                target_file = Path(osu_file_path)
+                target_name = os.path.basename(osu_file_path)
+            except Exception as e:
+                raise ParseError(f".mc 转 .osu 失败: {e}") from e
+
+        if section is not None:
+            try:
+                raw_text = target_file.read_text(encoding="utf-8-sig")
+            except UnicodeDecodeError:
+                raw_text = target_file.read_text(encoding="utf-8", errors="ignore")
+            slice_result = await asyncio.to_thread(
+                slice_osu_text_by_time_range,
+                raw_text,
+                section.start_chart_ms,
+                section.end_chart_ms,
             )
-            target_file = Path(osu_file_path)
-            target_name = os.path.basename(osu_file_path)
-        except Exception as e:
-            raise ParseError(f".mc 转 .osu 失败: {e}") from e
+            if slice_result.object_count <= 0:
+                raise ParseError(
+                    "区间内没有可分析的物件，请检查区间是否超出谱面范围。"
+                )
+            section_object_count = slice_result.object_count
+            section_file = cache_dir / f"mapview_section_{uuid.uuid4().hex[:12]}.osu"
+            await asyncio.to_thread(section_file.write_text, slice_result.text, "utf-8")
+            target_file = section_file
 
-    cache_key = _analysis_cache_key(target_file, speed_rate, od_flag, cvt_flag)
-    analysis = _analysis_cache_get(cache_key) if cache_key is not None else None
-    if analysis is None:
-        analysis = await _compute_mapview_analysis(
-            target_file, target_name, speed_rate, od_flag, cvt_flag
-        )
-        if cache_key is not None:
-            _analysis_cache_put(cache_key, analysis)
+        cache_key = _analysis_cache_key(target_file, speed_rate, od_flag, cvt_flag)
+        analysis = _analysis_cache_get(cache_key) if cache_key is not None else None
+        if analysis is None:
+            analysis = await _compute_mapview_analysis(
+                target_file, target_name, speed_rate, od_flag, cvt_flag
+            )
+            if cache_key is not None:
+                _analysis_cache_put(cache_key, analysis)
 
-    return {
-        "file_name": target_name,
-        "template": _build_mapview_template(
-            analysis, target_name, speed_rate, od_flag, mod_display
-        ),
-    }
+        return {
+            "file_name": target_name,
+            "template": _build_mapview_template(
+                analysis,
+                target_name,
+                speed_rate,
+                od_flag,
+                mod_display,
+                section=section,
+                section_object_count=section_object_count,
+            ),
+        }
+    finally:
+        if section_file is not None and section_file.exists():
+            section_file.unlink(missing_ok=True)
 
 
 async def analyze_mapview_zip(
@@ -528,6 +589,8 @@ def format_mapview_result_text(row: dict[str, Any]) -> str:
     lines = [
         f"谱面信息: {t.get('status_text', 'Unknown')}",
     ]
+    if t.get("section_note"):
+        lines.append(f"区间: {t['section_note']}")
     meta = t.get("rework_meta_lines", []) or []
     lines.extend(meta)
     diff_top = t.get("rework_diff_top", "-")

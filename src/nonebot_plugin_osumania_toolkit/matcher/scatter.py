@@ -32,7 +32,9 @@ async def handle_first(bot: Bot, event: Event, state: T_State):
     state["status"] = "init"
     
     cmd_text = event.get_plaintext().strip()
-    _speed_rate, _od_flag, _cvt_flag, bid, _mod_display, cmd_err_msg = parse_cmd(cmd_text)
+    _speed_rate, _od_flag, _cvt_flag, bid, _mod_display, cmd_err_msg, _range_text = (
+        parse_cmd(cmd_text)
+    )
     if cmd_err_msg:
         state["status"] = "Fail"
         await scatter.finish("错误:\n" + "\n".join(cmd_err_msg) + "\n请检查命令格式并重试。")

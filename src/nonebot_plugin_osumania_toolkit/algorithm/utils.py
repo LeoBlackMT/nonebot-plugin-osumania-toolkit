@@ -139,10 +139,36 @@ def parse_cmd(cmd_text: str):
     od_flag = None
     bid = None
     cvt_flag = []
+    range_text = None
 
     i = 0
     while i < len(cmd_parts):
         part = cmd_parts[i]
+
+        # 区间参数：-range 1:30-2:10 / -range=1:30-2:10
+        # 只由 /mapview 消费，其他命令解包时忽略。
+        if part.lower() in {"-range", "--range"}:
+            if i + 1 >= len(cmd_parts):
+                err_msg.append("区间参数缺少值，格式: -range 1:30-2:10; ")
+                i += 1
+                continue
+            if range_text is not None:
+                err_msg.append("区间参数重复; ")
+                i += 2
+                continue
+            range_text = cmd_parts[i + 1]
+            i += 2
+            continue
+        if part.lower().startswith("-range=") or part.lower().startswith("--range="):
+            value = part.split("=", 1)[1]
+            if not value:
+                err_msg.append("区间参数缺少值，格式: -range 1:30-2:10; ")
+            elif range_text is not None:
+                err_msg.append("区间参数重复; ")
+            else:
+                range_text = value
+            i += 1
+            continue
 
         # 特殊处理：当部分以 "b" 开头且包含 "+" 但无法解析为整数时，尝试拆分
         if part.lower().startswith("b") and "+" in part:
@@ -249,7 +275,7 @@ def parse_cmd(cmd_text: str):
 
         i += 1
 
-    return speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg
+    return speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg, range_text
 
 def is_mc_file(file_path: str) -> bool:
     """

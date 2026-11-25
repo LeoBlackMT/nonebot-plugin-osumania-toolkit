@@ -13,6 +13,7 @@ from ..algorithm.mapview import (
     format_mapview_result_text,
     format_parse_error_for_user,
 )
+from ..algorithm.section import SectionSpec, parse_section_range
 from ..algorithm.pattern import PatternNotManiaError, PatternParseError
 from ..algorithm.estimator.exceptions import ParseError, NotManiaError
 from ..algorithm.utils import parse_cmd, send_forward_text_messages
@@ -36,10 +37,19 @@ mapview = on_command("mapview", aliases={"rework"}, block=True)
 @mapview.handle()
 async def handle_mapview(bot: Bot, event: Event):
     cmd_text = event.get_plaintext().strip()
-    speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg = parse_cmd(cmd_text)
+    speed_rate, od_flag, cvt_flag, bid, mod_display, err_msg, range_text = parse_cmd(
+        cmd_text
+    )
 
     if err_msg:
         await mapview.finish("错误:\n" + "\n".join(err_msg) + "\n请检查命令格式并重试。")
+
+    section: SectionSpec | None = None
+    if range_text:
+        try:
+            section = parse_section_range(range_text, speed_rate)
+        except ValueError as e:
+            await mapview.finish(f"区间参数错误：{e}\n格式示例：-range 1:30-2:10")
 
     tmp_file: Path | None = None
     chart_file: Path | None = None
@@ -54,6 +64,9 @@ async def handle_mapview(bot: Bot, event: Event):
 
             tmp_file = CACHE_DIR / file_name
             await download_file(file_url, tmp_file)
+
+            if section is not None and file_name.lower().endswith((".osz", ".mcz")):
+                await mapview.finish("区间分析仅支持单张谱面，请勿对图包使用 -range。")
 
             if file_name.lower().endswith((".osz", ".mcz")):
                 if platform.is_qq(bot):
@@ -166,6 +179,7 @@ async def handle_mapview(bot: Bot, event: Event):
                     cvt_flag,
                     mod_display,
                     CACHE_DIR,
+                    section=section,
                 )
                 try:
                     image_bytes = await render_analysis_card(
@@ -190,6 +204,7 @@ async def handle_mapview(bot: Bot, event: Event):
                 cvt_flag,
                 mod_display,
                 CACHE_DIR,
+                section=section,
             )
             try:
                 image_bytes = await render_analysis_card(
